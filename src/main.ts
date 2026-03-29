@@ -1,4 +1,4 @@
-import { App, MarkdownView, Notice, Plugin, TFile, normalizePath } from 'obsidian';
+import { App, MarkdownView, Notice, Plugin, TFile, TFolder, normalizePath, MarkdownRenderer } from 'obsidian';
 import { DEFAULT_SETTINGS, FolderDashSettings, FolderDashSettingTab } from "./settings";
 
 export default class FolderDashPlugin extends Plugin {
@@ -22,11 +22,32 @@ export default class FolderDashPlugin extends Plugin {
 		// 設定タブの追加
 		this.addSettingTab(new FolderDashSettingTab(this.app, this));
 
-		// --- [Phase 2以降の拡張ポイント] ---
-		// ここで MarkdownPostProcessor を登録し、`folder-summary` コードブロックを拡張します。
-		// this.registerMarkdownCodeBlockProcessor("folder-summary", (source, el, ctx) => {
-		//     // フォルダ内のファイル一覧を取得し、レンダリングする処理を実装
-		// });
+		// --- [Phase 2: コードブロックプロセッサの登録] ---
+		this.registerMarkdownCodeBlockProcessor("folder-summary", async (source, el, ctx) => {
+			const sourceFile = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
+			if (!(sourceFile instanceof TFile)) return;
+
+			const parentFolder = sourceFile.parent;
+			if (!parentFolder) return;
+
+			// 同一フォルダ内のMarkdownファイルを取得 (_Summary.md を除く)
+			const links: string[] = [];
+			for (const child of parentFolder.children) {
+				if (child instanceof TFile && child.extension === 'md' && child.name !== '_Summary.md') {
+					// Obsidianの内部リンク記法でリストアイテムを作成
+					// パスを指定することで、同名ファイルが存在した場合の名前の衝突を避ける
+					links.push(`- [[${child.path}|${child.basename}]]`);
+				}
+			}
+
+			el.empty();
+			if (links.length > 0) {
+				// MarkdownRendererを用いて、リンク文字列を実際のHTMLとしてレンダリングする
+				await MarkdownRenderer.renderMarkdown(links.join('\n'), el, ctx.sourcePath, this);
+			} else {
+				el.createEl('p', { text: 'このフォルダには他のMarkdownファイルがありません。' });
+			}
+		});
 	}
 
 	onunload() {
