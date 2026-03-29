@@ -1,18 +1,19 @@
 import {App, PluginSettingTab, Setting} from "obsidian";
-import MyPlugin from "./main";
+import FolderDashPlugin from "./main";
 
-export interface MyPluginSettings {
-	mySetting: string;
+export interface FolderDashSettings {
+	// Future settings for the plugin can be added here
+	defaultStatus: string;
 }
 
-export const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+export const DEFAULT_SETTINGS: FolderDashSettings = {
+	defaultStatus: '着手前'
 }
 
-export class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+export class FolderDashSettingTab extends PluginSettingTab {
+	plugin: FolderDashPlugin;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: FolderDashPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
@@ -23,13 +24,13 @@ export class SampleSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Settings #1')
-			.setDesc('It\'s a secret')
+			.setName('デフォルトステータス')
+			.setDesc('まとめノート作成時の初期ステータス')
 			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
+				.setPlaceholder('例: 着手前')
+				.setValue(this.plugin.settings.defaultStatus)
 				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
+					this.plugin.settings.defaultStatus = value;
 					await this.plugin.saveSettings();
 				}));
 	}
