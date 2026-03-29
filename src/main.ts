@@ -22,7 +22,7 @@ export default class FolderDashPlugin extends Plugin {
 		// 設定タブの追加
 		this.addSettingTab(new FolderDashSettingTab(this.app, this));
 
-		// --- [Phase 2: コードブロックプロセッサの登録] ---
+		// --- [Phase 2 & 3: コードブロックプロセッサの登録（分類機能つき）] ---
 		this.registerMarkdownCodeBlockProcessor("folder-summary", async (source, el, ctx) => {
 			const sourceFile = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
 			if (!(sourceFile instanceof TFile)) return;
@@ -30,23 +30,76 @@ export default class FolderDashPlugin extends Plugin {
 			const parentFolder = sourceFile.parent;
 			if (!parentFolder) return;
 
+			// 分類用配列
+			const deliverables: string[] = [];
+			const memos: string[] = [];
+			const others: string[] = [];
+
 			// 同一フォルダ内のMarkdownファイルを取得 (_Summary.md を除く)
-			const links: string[] = [];
 			for (const child of parentFolder.children) {
 				if (child instanceof TFile && child.extension === 'md' && child.name !== '_Summary.md') {
+
+					// キャッシュからフロントマターを取得
+					const cache = this.app.metadataCache.getFileCache(child);
+					const frontmatter = cache?.frontmatter;
+
+					let isDeliverable = false;
+					let isMemo = false;
+
+					if (frontmatter) {
+						const typeConf = frontmatter['type'] || '';
+						// tags or tag are common properties in Obsidian YAML for tags
+						const tagsConf = frontmatter['tags'] || frontmatter['tag'] || [];
+
+						const typeStr = String(typeConf).toLowerCase();
+						const tagsArr = Array.isArray(tagsConf) ? tagsConf.map(t => String(t).toLowerCase()) : [String(tagsConf).toLowerCase()];
+
+						// 成果物判定
+						if (['deliverable', '成果物', 'product'].includes(typeStr) ||
+							tagsArr.some(t => t.includes('deliverable') || t.includes('成果物'))) {
+							isDeliverable = true;
+						}
+						// メモ判定
+						else if (['memo', 'メモ', 'note'].includes(typeStr) ||
+							tagsArr.some(t => t.includes('memo') || t.includes('メモ') || t.includes('note'))) {
+							isMemo = true;
+						}
+					}
+
 					// Obsidianの内部リンク記法でリストアイテムを作成
-					// パスを指定することで、同名ファイルが存在した場合の名前の衝突を避ける
-					links.push(`- [[${child.path}|${child.basename}]]`);
+					const linkItem = `- [[${child.path}|${child.basename}]]`;
+
+					if (isDeliverable) {
+						deliverables.push(linkItem);
+					} else if (isMemo) {
+						memos.push(linkItem);
+					} else {
+						others.push(linkItem);
+					}
 				}
 			}
 
 			el.empty();
-			if (links.length > 0) {
-				// MarkdownRendererを用いて、リンク文字列を実際のHTMLとしてレンダリングする
-				await MarkdownRenderer.renderMarkdown(links.join('\n'), el, ctx.sourcePath, this);
-			} else {
+
+			// セクションごとにMarkdownをHTMLにレンダリングするヘルパー関数
+			const renderSection = async (title: string, items: string[]) => {
+				if (items.length > 0) {
+					// MarkdownRendererを用いて、タイトルとリストをレンダリングする
+					const markdownText = `**${title}**\n${items.join('\n')}\n`;
+					const wrapper = el.createDiv({ cls: 'folder-dash-section' });
+					await MarkdownRenderer.renderMarkdown(markdownText, wrapper, ctx.sourcePath, this);
+				}
+			};
+
+			if (deliverables.length === 0 && memos.length === 0 && others.length === 0) {
 				el.createEl('p', { text: 'このフォルダには他のMarkdownファイルがありません。' });
+				return;
 			}
+
+			// カテゴリごとにレンダリング
+			await renderSection('🌟 成果物 (Deliverables)', deliverables);
+			await renderSection('📝 メモ (Memos)', memos);
+			await renderSection('📁 その他 (Others)', others);
 		});
 	}
 
