@@ -1,8 +1,14 @@
-/*
+/* Phase 9: Compact Properties View for Dashboard */
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.is-enhance-board-summary .metadata-container {
+    max-height: 48px;
+    opacity: 0.5;
+    overflow: hidden;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+}
 
-If your plugin does not need CSS, delete this file.
-
-*/
+.is-enhance-board-summary .metadata-container:hover {
+    max-height: 1000px;
+    opacity: 1;
+    overflow: visible;
+}

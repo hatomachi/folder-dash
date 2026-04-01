@@ -135,6 +135,27 @@ export default class FolderDashPlugin extends Plugin {
 
 		this.addSettingTab(new FolderDashSettingTab(this.app, this));
 
+		// Phase 9: ワークスペースの file-open イベントを監視してクラスを付与/剥奪
+		this.registerEvent(
+			this.app.workspace.on('file-open', (file) => {
+				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (view) {
+					if (file && file.name === '_Summary.md') {
+						view.containerEl.classList.add('is-enhance-board-summary');
+					} else {
+						view.containerEl.classList.remove('is-enhance-board-summary');
+					}
+				}
+			})
+		);
+
+		this.app.workspace.onLayoutReady(() => {
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (view && view.file && view.file.name === '_Summary.md') {
+				view.containerEl.classList.add('is-enhance-board-summary');
+			}
+		});
+
 		// --- [Phase 2 〜 8: コードブロックプロセッサの登録] ---
 		this.registerMarkdownCodeBlockProcessor("folder-summary", async (source, el, ctx) => {
 			const sourceFile = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
@@ -277,7 +298,7 @@ export default class FolderDashPlugin extends Plugin {
 
 						for (const cat of this.settings.noteCategories) {
 							if (typeStr === cat.id.toLowerCase() || tagsArr.some(t => t.includes(cat.id.toLowerCase()))) {
-								categoryGroups[cat.id].push(fileItem);
+								if (categoryGroups[cat.id]) categoryGroups[cat.id].push(fileItem);
 								matched = true;
 								break;
 							}
@@ -345,7 +366,7 @@ assignee: ${currentUser}${typeProp}
 			};
 
 			for (const cat of this.settings.noteCategories) {
-				await renderSection(cat.name, categoryGroups[cat.id], cat.id);
+				await renderSection(cat.name, categoryGroups[cat.id] || [], cat.id);
 			}
 			await renderSection('📁 その他 (Others)', others, undefined); // その他はカテゴリIDなし
 
