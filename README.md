@@ -1,90 +1,23 @@
-# Obsidian Sample Plugin
+# Folder Dash (folder-dash)
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+## コンセプトと解決する課題
+1つの機能エンハンスやタスク開発において、1つの専用ディレクトリを割り当てる**「1タスク＝1フォルダ」**の原則を強力にサポートするためのObsidianカスタムプラグインです。
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+本プラグインは、以下の現場の課題を解決します。
+- **カオス化の防止**: Git管理下で、仕様書（成果物）、個人の壁打ちメモ、そしてレビュー指摘ノートなどが1つのフォルダに混在し、どれが最新のドキュメントで何が進行中なのか分からなくなる状態を防ぎます。
+- **TOC（制約条件の理論）に基づくリードタイム管理**: 単純な「作業中」というステータス管理ではなく、「実際に手を動かした時間（プロセスタイム）」と「他チームの返答やレビューを待っていた時間（ウェイトタイム）」を明確に分離・計測し、開発の真のボトルネックを可視化します。
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open modal (simple)" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+## 主な機能
+- **「まとめノート」の自動生成**: コマンド一発で、フォルダのダッシュボードとなる `_Summary.md` を生成します。
+- **自動分類ダッシュボード**: フォルダ内のファイルを「成果物」「レビュー指摘」「メモ」など（※設定から自由にカスタマイズ可能）へ自動分類し、最終更新日時が新しいものから順（降順）に詳細表示します。また、見出し横の「＋追加」ボタンから、適切なプロパティを持った新規ノートを瞬時に作成できます。
+- **アンドン（状況可視化）機能**: レンダリングされた上部の機能ボタン（「▶ 着手」「⏸ ブロック」「✅ 完了」）を押すことで、現在のステータスと時間が自動記録されます。ブロック時にはなぜ作業がストップしたのかの理由を入力でき、その履歴（誰がいつどのアクションをしたか）が下部にタイムラインとして記録されます。
+- **CSSによるプロパティのコンパクト化**: YAMLフロントマターが画面上部を占領しないよう、当該ノートを開いている時のみ、通常時は高さを制限して半透明化させる工夫がされています。マウスオーバーで即座に全プロパティが展開され、確認・編集が可能です。
+- **Git連携（担当者の自動取得）**: 煩わしい手動設定を避けるため、バックグラウンドのNode.jsレイヤーで `git config user.name` からユーザー名を自動取得し、ボタンアクション時の担当者（Assignee）や操作履歴に自動打刻・引き継ぎ（テイクオーバー）を行います。
 
-## First time developing plugins?
-
-Quick starting guide for new plugin devs:
-
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
-
-## Releasing new releases
-
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
-
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
-
-## Adding your plugin to the community plugin list
-
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
-
-## How to use
-
-- Clone this repo.
-- Make sure your NodeJS is at least v16 (`node --version`).
-- `npm i` or `yarn` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
-
-## Manually installing the plugin
-
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
-
-## Improve code quality with eslint
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
-- This project already has eslint preconfigured, you can invoke a check by running`npm run lint`
-- Together with a custom eslint [plugin](https://github.com/obsidianmd/eslint-plugin) for Obsidan specific code guidelines.
-- A GitHub action is preconfigured to automatically lint every commit on all branches.
-
-## Funding URL
-
-You can include funding URLs where people who use your plugin can financially support it.
-
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
-
-```json
-{
-    "fundingUrl": "https://buymeacoffee.com"
-}
-```
-
-If you have multiple URLs, you can also do:
-
-```json
-{
-    "fundingUrl": {
-        "Buy Me a Coffee": "https://buymeacoffee.com",
-        "GitHub Sponsor": "https://github.com/sponsors",
-        "Patreon": "https://www.patreon.com/"
-    }
-}
-```
-
-## API Documentation
-
-See https://docs.obsidian.md
+## 使い方
+1. Obsidian上で新しいタスク・エンハンス用のフォルダ（または既存のフォルダ）を作成・選択します。
+2. コマンドパレットを開き、`現在のフォルダにまとめノートを作成/開く` を実行します。
+3. 自動生成された `_Summary.md` を開き、ダッシュボード画面が表示されたら「▶ 着手」ボタンを押して作業を開始します。
+4. 別チームへ仕様の問い合わせをする際や、PRを出してレビューを待つ間は、「⏸ ブロック」ボタンを押します。
+5. 出現した入力枠に理由（例: "レビュー待ち"）を記録し、作業に戻る際は再度「▶ 着手」を押します。
+6. すべてが終わったら「✅ 完了」を押すことで、トータルのリードタイムと純粋な稼働時間が集計されます。

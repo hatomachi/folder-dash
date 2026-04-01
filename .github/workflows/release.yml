@@ -1,0 +1,38 @@
+name: Release Obsidian Plugin
+
+# 「v1.0.0」のようなタグがPushされた時だけこのアクションが動く設定
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. リポジトリのコードをチェックアウト
+      - uses: actions/checkout@v3
+
+      # 2. Node.jsのセットアップ
+      - name: Use Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18.x" # Obsidianの推奨バージョンに合わせています
+
+      # 3. パッケージのインストールとビルド（ここで main.js が生成される）
+      - name: Build plugin
+        run: |
+          npm install
+          npm run build
+
+      # 4. GitHub Releaseを作成し、必要なファイルを添付する
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            main.js
+            manifest.json
+            styles.css
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
