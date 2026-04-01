@@ -16,7 +16,8 @@ export const DEFAULT_SETTINGS: FolderDashSettings = {
 	noteCategories: [
 		{ id: 'deliverable', name: '🌟 成果物' },
 		{ id: 'review', name: '💬 レビュー指摘' },
-		{ id: 'memo', name: '📝 メモ' }
+		{ id: 'memo', name: '📝 メモ' },
+		{ id: 'self-check', name: '✅ レビュー前セルフチェックシート' }
 	]
 }
 

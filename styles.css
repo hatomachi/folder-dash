@@ -12,3 +12,24 @@
     opacity: 1;
     overflow: visible;
 }
+
+/* Phase 10: Category Select Dropdown Inline */
+.folder-dash-category-select {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    border-radius: 4px;
+    padding: 1px 4px;
+    font-size: 0.85em;
+    margin-left: 10px;
+    cursor: pointer;
+    appearance: none;
+    transition: all 0.2s ease;
+}
+
+.folder-dash-category-select:hover,
+.folder-dash-category-select:focus {
+    background: var(--background-modifier-hover);
+    border-color: var(--background-modifier-border);
+    color: var(--text-normal);
+}

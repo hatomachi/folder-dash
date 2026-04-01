@@ -156,7 +156,7 @@ export default class FolderDashPlugin extends Plugin {
 			}
 		});
 
-		// --- [Phase 2 〜 8: コードブロックプロセッサの登録] ---
+		// --- [Phase 2 〜 10: コードブロックプロセッサの登録] ---
 		this.registerMarkdownCodeBlockProcessor("folder-summary", async (source, el, ctx) => {
 			const sourceFile = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
 			if (!(sourceFile instanceof TFile)) return;
@@ -269,7 +269,6 @@ export default class FolderDashPlugin extends Plugin {
 
 
 			// UI 2: ファイルリスト（Phase 6 カテゴリ別表示 ＋ Phase 7 詳細表示と降順ソート）
-			// アイテムを保持するオブジェクト構造に変更してメタデータを格納 (Phase 7)
 			interface FileItem { file: TFile, mtime: number, assignee: string }
 			const categoryGroups: Record<string, FileItem[]> = {};
 			this.settings.noteCategories.forEach(cat => {
@@ -298,7 +297,8 @@ export default class FolderDashPlugin extends Plugin {
 
 						for (const cat of this.settings.noteCategories) {
 							if (typeStr === cat.id.toLowerCase() || tagsArr.some(t => t.includes(cat.id.toLowerCase()))) {
-								categoryGroups[cat.id]?.push(fileItem);
+								const group = categoryGroups[cat.id];
+								if (group) group.push(fileItem);
 								matched = true;
 								break;
 							}
@@ -311,13 +311,15 @@ export default class FolderDashPlugin extends Plugin {
 				}
 			}
 
-			// アイテムをフォーマットし降順にソートするヘルパー (Phase 7)
+			// Phase 10: アイテムをフォーマットし降順にソートするヘルパー
 			const formatAndSortItems = (items: FileItem[]): string[] => {
 				items.sort((a, b) => b.mtime - a.mtime); // mtimeが大きい（新しい）順に降順ソート
 				return items.map(item => {
 					// @ts-ignore
 					const dateStr = window.moment ? window.moment(item.mtime).format('YYYY-MM-DD HH:mm') : new Date(item.mtime).toLocaleString();
-					return `- [[${item.file.path}|${item.file.basename}]] <span style="font-size: 0.85em; color: var(--text-muted); margin-left: 8px;">👤 担当: ${item.assignee} &nbsp;|&nbsp; 🕒 更新: ${dateStr}</span>`;
+
+					// Phase 10: Inject `data-filepath` onto the link Wrapper so we can find it
+					return `- <span class="folder-dash-item-link" data-filepath="${item.file.path}">[[${item.file.path}|${item.file.basename}]]</span> <span style="font-size: 0.85em; color: var(--text-muted); margin-left: 8px;">👤 担当: ${item.assignee} &nbsp;|&nbsp; 🕒 更新: ${dateStr}</span>`;
 				});
 			};
 
@@ -354,12 +356,58 @@ assignee: ${currentUser}${typeProp}
 					}).open();
 				};
 
-				// リストアイテムの描画
+				// リストアイテムの描画と、Phase 10 のセレクトメニューインジェクション
 				if (items.length > 0) {
 					const formattedStrings = formatAndSortItems(items);
 					const markdownText = `${formattedStrings.join('\n')}\n`;
 					const listWrapper = sectionWrapper.createDiv();
 					await MarkdownRenderer.renderMarkdown(markdownText, listWrapper, ctx.sourcePath, this);
+
+					// Phase 10: MarkdownRenderer 完了後に DOM を探して <select> を注入
+					listWrapper.querySelectorAll('.folder-dash-item-link').forEach(span => {
+						const pathAttr = span.getAttribute('data-filepath');
+						if (!pathAttr) return;
+
+						const selectEl = document.createElement('select');
+						selectEl.className = 'folder-dash-category-select';
+
+						// Populate Options from Settings
+						this.settings.noteCategories.forEach(c => {
+							const opt = document.createElement('option');
+							opt.value = c.id;
+							opt.text = c.name;
+							if (catId === c.id) opt.selected = true; // Set self as selected
+							selectEl.appendChild(opt);
+						});
+
+						const noneOpt = document.createElement('option');
+						noneOpt.value = 'none';
+						noneOpt.text = '未分類/その他';
+						if (!catId) noneOpt.selected = true;
+						selectEl.appendChild(noneOpt);
+
+						// Attach event map
+						selectEl.onchange = async () => {
+							const targetFile = this.app.vault.getAbstractFileByPath(pathAttr);
+							if (targetFile instanceof TFile) {
+								await this.app.fileManager.processFrontMatter(targetFile, (fm) => {
+									if (selectEl.value === 'none') {
+										delete fm['type'];
+									} else {
+										fm['type'] = selectEl.value;
+									}
+								});
+								// Since processFrontMatter invokes Obsidian events, the UI block is auto-replacing!
+								new Notice(`ノートの種別を更新しました`);
+							}
+						};
+
+						// Insert DOM element right after the Span tag
+						if (span.parentNode) {
+							span.parentNode.insertBefore(selectEl, span.nextSibling);
+						}
+					});
+
 				} else {
 					sectionWrapper.createEl('p', { text: 'アイテムがありません。', attr: { style: 'color: var(--text-muted); font-size: 0.9em; margin-top: 5px;' } });
 				}
