@@ -7,6 +7,7 @@ const execPromise = promisify(exec);
 
 async function getGitUser(app: App): Promise<string> {
 	try {
+		// Obtains the root path of the active Vault
 		const basePath = (app.vault.adapter as any).getBasePath ? (app.vault.adapter as any).getBasePath() : '';
 		if (!basePath) return 'Unknown User';
 
@@ -82,6 +83,7 @@ export default class FolderDashPlugin extends Plugin {
 
 		this.addSettingTab(new FolderDashSettingTab(this.app, this));
 
+		// --- [Phase 2 〜 7: コードブロックプロセッサの登] ---
 		this.registerMarkdownCodeBlockProcessor("folder-summary", async (source, el, ctx) => {
 			const sourceFile = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
 			if (!(sourceFile instanceof TFile)) return;
@@ -193,17 +195,25 @@ export default class FolderDashPlugin extends Plugin {
 			};
 
 
-			// UI 2: ファイルリスト（Phase 6 動的設定分類）
-			const categoryGroups: Record<string, string[]> = {};
+			// UI 2: ファイルリスト（Phase 6 カテゴリ別表示 ＋ Phase 7 詳細表示と降順ソート）
+			// アイテムを保持するオブジェクト構造に変更してメタデータを格納 (Phase 7)
+			interface FileItem { file: TFile, mtime: number, assignee: string }
+			const categoryGroups: Record<string, FileItem[]> = {};
 			this.settings.noteCategories.forEach(cat => {
 				categoryGroups[cat.id] = [];
 			});
-			const others: string[] = [];
+			const others: FileItem[] = [];
 
 			for (const child of parentFolder.children) {
 				if (child instanceof TFile && child.extension === 'md' && child.name !== '_Summary.md') {
 					const cache = this.app.metadataCache.getFileCache(child);
 					const frontmatter = cache?.frontmatter;
+
+					const fileItem: FileItem = {
+						file: child,
+						mtime: child.stat.mtime,
+						assignee: frontmatter ? (frontmatter['assignee'] || '未設定') : '未設定'
+					};
 
 					let matched = false;
 
@@ -215,24 +225,33 @@ export default class FolderDashPlugin extends Plugin {
 
 						for (const cat of this.settings.noteCategories) {
 							if (typeStr === cat.id.toLowerCase() || tagsArr.some(t => t.includes(cat.id.toLowerCase()))) {
-								categoryGroups[cat.id].push(`- [[${child.path}|${child.basename}]]`);
+								categoryGroups[cat.id].push(fileItem);
 								matched = true;
 								break;
 							}
 						}
 					}
 
-					const linkItem = `- [[${child.path}|${child.basename}]]`;
-
 					if (!matched) {
-						others.push(linkItem);
+						others.push(fileItem);
 					}
 				}
 			}
 
-			const renderSection = async (title: string, items: string[]) => {
+			// アイテムをフォーマットし降順にソートするヘルパー (Phase 7)
+			const formatAndSortItems = (items: FileItem[]): string[] => {
+				items.sort((a, b) => b.mtime - a.mtime); // mtimeが大きい（新しい）順に降順ソート
+				return items.map(item => {
+					// @ts-ignore
+					const dateStr = window.moment ? window.moment(item.mtime).format('YYYY-MM-DD HH:mm') : new Date(item.mtime).toLocaleString();
+					return `- [[${item.file.path}|${item.file.basename}]] <span style="font-size: 0.85em; color: var(--text-muted); margin-left: 8px;">👤 担当: ${item.assignee} &nbsp;|&nbsp; 🕒 更新: ${dateStr}</span>`;
+				});
+			};
+
+			const renderSection = async (title: string, items: FileItem[]) => {
 				if (items.length > 0) {
-					const markdownText = `**${title}**\n${items.join('\n')}\n`;
+					const formattedStrings = formatAndSortItems(items);
+					const markdownText = `**${title}**\n${formattedStrings.join('\n')}\n`;
 					const wrapper = el.createDiv({ cls: 'folder-dash-section' });
 					await MarkdownRenderer.renderMarkdown(markdownText, wrapper, ctx.sourcePath, this);
 				}
