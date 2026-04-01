@@ -1,5 +1,24 @@
 import { App, MarkdownView, Notice, Plugin, TFile, TFolder, normalizePath, MarkdownRenderer, Modal, Setting } from 'obsidian';
 import { DEFAULT_SETTINGS, FolderDashSettings, FolderDashSettingTab } from "./settings";
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execPromise = promisify(exec);
+
+// --- Phase 5: Helper function to get Git Username ---
+async function getGitUser(app: App): Promise<string> {
+	try {
+		// Obtains the root path of the active Vault
+		const basePath = (app.vault.adapter as any).getBasePath ? (app.vault.adapter as any).getBasePath() : '';
+		if (!basePath) return 'Unknown User';
+
+		const { stdout } = await execPromise('git config user.name', { cwd: basePath });
+		const name = stdout.trim();
+		return name || 'Unknown User';
+	} catch (e) {
+		return 'Unknown User';
+	}
+}
 
 class ReasonInputModal extends Modal {
 	onSubmit: (result: string) => void;
@@ -65,7 +84,7 @@ export default class FolderDashPlugin extends Plugin {
 
 		this.addSettingTab(new FolderDashSettingTab(this.app, this));
 
-		// --- [Phase 2, 3 & 4: コードブロックプロセッサの登録（TOCメトリクス＋機能）] ---
+		// --- [Phase 2, 3, 4 & 5: コードブロックプロセッサの登録] ---
 		this.registerMarkdownCodeBlockProcessor("folder-summary", async (source, el, ctx) => {
 			const sourceFile = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
 			if (!(sourceFile instanceof TFile)) return;
@@ -77,20 +96,22 @@ export default class FolderDashPlugin extends Plugin {
 			const summaryCache = this.app.metadataCache.getFileCache(sourceFile);
 			const sfm = summaryCache?.frontmatter || {};
 
+			// Assignee attribute implementation (Phase 5)
+			const currentAssignee = sfm['assignee'] || '未設定';
+
 			const currentStatus = sfm['status'] || 'not-started';
 			const workTimeMins = sfm['work_time_minutes'] || 0;
 			const blockTimeMins = sfm['block_time_minutes'] || 0;
 
-			// Format dates
 			const formatDate = (isoString?: string) => isoString ? new Date(isoString).toLocaleString() : '未記録';
 			const startedAt = formatDate(sfm['started_at']);
 			const completedAt = formatDate(sfm['completed_at']);
 
 			const headerDiv = el.createDiv({ cls: 'folder-dash-header', attr: { style: 'background: var(--background-secondary); padding: 15px; border-radius: 8px; margin-bottom: 20px;' } });
 
-			// Metrics Table
 			const mxTable = headerDiv.createEl('table', { attr: { style: 'width: 100%; text-align: left; margin-bottom: 15px; border-collapse: collapse;' } });
 			const tr1 = mxTable.createEl('tr');
+			tr1.createEl('th', { text: '担当者', attr: { style: 'padding-bottom: 5px; border-bottom: 1px solid var(--background-modifier-border);' } });
 			tr1.createEl('th', { text: 'ステータス', attr: { style: 'padding-bottom: 5px; border-bottom: 1px solid var(--background-modifier-border);' } });
 			tr1.createEl('th', { text: '着手日', attr: { style: 'padding-bottom: 5px; border-bottom: 1px solid var(--background-modifier-border);' } });
 			tr1.createEl('th', { text: '完成日', attr: { style: 'padding-bottom: 5px; border-bottom: 1px solid var(--background-modifier-border);' } });
@@ -98,21 +119,26 @@ export default class FolderDashPlugin extends Plugin {
 			tr1.createEl('th', { text: 'ブロック時間', attr: { style: 'padding-bottom: 5px; border-bottom: 1px solid var(--background-modifier-border);' } });
 
 			const tr2 = mxTable.createEl('tr');
+			tr2.createEl('td', { text: currentAssignee, attr: { style: 'padding-top: 8px; font-weight: bold;' } });
 			tr2.createEl('td', { text: currentStatus, attr: { style: 'padding-top: 8px;' } });
 			tr2.createEl('td', { text: startedAt, attr: { style: 'padding-top: 8px;' } });
 			tr2.createEl('td', { text: completedAt, attr: { style: 'padding-top: 8px;' } });
 			tr2.createEl('td', { text: `${workTimeMins} 分`, attr: { style: 'padding-top: 8px;' } });
 			tr2.createEl('td', { text: `${blockTimeMins} 分`, attr: { style: 'padding-top: 8px;' } });
 
-			// Buttons
 			const btnGroup = headerDiv.createDiv({ cls: 'folder-dash-buttons', attr: { style: 'display: flex; gap: 10px;' } });
 
 			const updateStatus = async (newStatus: string, actionName: string, reason?: string) => {
+				// Dynamically fetch the executor of this action (Phase 5)
+				const currentUser = await getGitUser(this.app);
+
 				await this.app.fileManager.processFrontMatter(sourceFile, (frontmatter) => {
 					const now = new Date();
 					const nowStr = now.toISOString();
 
-					// 着手日・完成日の記録 (一度記録されたら上書きしない)
+					// テイクオーバーの処理: アクションを起こした人が主担当になる
+					frontmatter['assignee'] = currentUser;
+
 					if (newStatus === 'in-progress' && !frontmatter['started_at']) {
 						frontmatter['started_at'] = nowStr;
 					}
@@ -120,7 +146,6 @@ export default class FolderDashPlugin extends Plugin {
 						frontmatter['completed_at'] = nowStr;
 					}
 
-					// 経過時間の計算と加算
 					const lastToggled = frontmatter['last_toggled_at'];
 					if (lastToggled) {
 						const diffMs = now.getTime() - new Date(lastToggled).getTime();
@@ -133,7 +158,6 @@ export default class FolderDashPlugin extends Plugin {
 						}
 					}
 
-					// ステータス更新
 					frontmatter['status'] = newStatus;
 
 					if (newStatus !== 'completed') {
@@ -142,11 +166,11 @@ export default class FolderDashPlugin extends Plugin {
 						delete frontmatter['last_toggled_at'];
 					}
 
-					// 作業履歴(History)の記録
 					let history = frontmatter['history'];
 					if (!Array.isArray(history)) history = [];
 
-					const eventLog: any = { time: nowStr, action: actionName };
+					// Add user payload to history tracking (Phase 5)
+					const eventLog: any = { time: nowStr, action: actionName, user: currentUser };
 					if (reason) eventLog.reason = reason;
 
 					history.push(eventLog);
@@ -235,8 +259,10 @@ export default class FolderDashPlugin extends Plugin {
 				for (const h of historyObj) {
 					const t = new Date(h.time).toLocaleString();
 					const actionIcon = h.action === 'start' ? '▶' : h.action === 'block' ? '⏸' : h.action === 'complete' ? '✅' : '⏺';
-					const listText = `${actionIcon} ${t} - ${h.action.toUpperCase()}${h.reason ? ` (理由: ${h.reason})` : ''}`;
-					ul.createEl('li', { text: listText });
+
+					// Render HTML mapping to visually differentiate the user logic
+					const li = ul.createEl('li');
+					li.innerHTML = `${actionIcon} ${t} - <b>${String(h.action).toUpperCase()}</b>${h.user ? ` by <i>${h.user}</i>` : ''}${h.reason ? ` <span style="color:var(--text-muted)">(理由: ${h.reason})</span>` : ''}`;
 				}
 			}
 		});
@@ -268,7 +294,11 @@ export default class FolderDashPlugin extends Plugin {
 			const now = new window.Date();
 			const isoString = now.toISOString();
 
+			// Generate the first assignee automatically based on Git Settings
+			const currentUser = await getGitUser(this.app);
+
 			const template = `---
+assignee: ${currentUser}
 status: ${this.settings.defaultStatus || 'not-started'}
 created_at: ${isoString}
 work_time_minutes: 0
