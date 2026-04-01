@@ -1,11 +1,10 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
+	"id": "folder-dash",
+	"name": "Folder Dash",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
-	"isDesktopOnly": false
+	"description": "1タスク＝1フォルダの原則で、フォルダをプロジェクト単位で扱うダッシュボード。TOCに基づくリードタイムと担当者の自動算出をサポートします。",
+	"author": "s-ikari",
+	"authorUrl": "",
+	"isDesktopOnly": true
 }
