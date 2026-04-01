@@ -298,7 +298,7 @@ export default class FolderDashPlugin extends Plugin {
 
 						for (const cat of this.settings.noteCategories) {
 							if (typeStr === cat.id.toLowerCase() || tagsArr.some(t => t.includes(cat.id.toLowerCase()))) {
-								if (categoryGroups[cat.id]) categoryGroups[cat.id].push(fileItem);
+								categoryGroups[cat.id]?.push(fileItem);
 								matched = true;
 								break;
 							}
