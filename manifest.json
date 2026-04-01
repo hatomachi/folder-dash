@@ -1,7 +1,7 @@
 {
 	"id": "folder-dash",
 	"name": "Folder Dash",
-	"version": "1.0.2",
+	"version": "1.0.3",
 	"minAppVersion": "0.15.0",
 	"description": "1タスク＝1フォルダの原則で、フォルダをプロジェクト単位で扱うダッシュボード。TOCに基づくリードタイムと担当者の自動算出をサポートします。",
 	"author": "s-ikari",
