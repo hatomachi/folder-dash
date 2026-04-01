@@ -5,10 +5,8 @@ import { promisify } from 'util';
 
 const execPromise = promisify(exec);
 
-// --- Phase 5: Helper function to get Git Username ---
 async function getGitUser(app: App): Promise<string> {
 	try {
-		// Obtains the root path of the active Vault
 		const basePath = (app.vault.adapter as any).getBasePath ? (app.vault.adapter as any).getBasePath() : '';
 		if (!basePath) return 'Unknown User';
 
@@ -84,7 +82,6 @@ export default class FolderDashPlugin extends Plugin {
 
 		this.addSettingTab(new FolderDashSettingTab(this.app, this));
 
-		// --- [Phase 2, 3, 4 & 5: コードブロックプロセッサの登録] ---
 		this.registerMarkdownCodeBlockProcessor("folder-summary", async (source, el, ctx) => {
 			const sourceFile = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
 			if (!(sourceFile instanceof TFile)) return;
@@ -96,9 +93,7 @@ export default class FolderDashPlugin extends Plugin {
 			const summaryCache = this.app.metadataCache.getFileCache(sourceFile);
 			const sfm = summaryCache?.frontmatter || {};
 
-			// Assignee attribute implementation (Phase 5)
 			const currentAssignee = sfm['assignee'] || '未設定';
-
 			const currentStatus = sfm['status'] || 'not-started';
 			const workTimeMins = sfm['work_time_minutes'] || 0;
 			const blockTimeMins = sfm['block_time_minutes'] || 0;
@@ -129,14 +124,12 @@ export default class FolderDashPlugin extends Plugin {
 			const btnGroup = headerDiv.createDiv({ cls: 'folder-dash-buttons', attr: { style: 'display: flex; gap: 10px;' } });
 
 			const updateStatus = async (newStatus: string, actionName: string, reason?: string) => {
-				// Dynamically fetch the executor of this action (Phase 5)
 				const currentUser = await getGitUser(this.app);
 
 				await this.app.fileManager.processFrontMatter(sourceFile, (frontmatter) => {
 					const now = new Date();
 					const nowStr = now.toISOString();
 
-					// テイクオーバーの処理: アクションを起こした人が主担当になる
 					frontmatter['assignee'] = currentUser;
 
 					if (newStatus === 'in-progress' && !frontmatter['started_at']) {
@@ -169,7 +162,6 @@ export default class FolderDashPlugin extends Plugin {
 					let history = frontmatter['history'];
 					if (!Array.isArray(history)) history = [];
 
-					// Add user payload to history tracking (Phase 5)
 					const eventLog: any = { time: nowStr, action: actionName, user: currentUser };
 					if (reason) eventLog.reason = reason;
 
@@ -201,9 +193,11 @@ export default class FolderDashPlugin extends Plugin {
 			};
 
 
-			// UI 2: ファイルリスト（Phase 3 自動分類）
-			const deliverables: string[] = [];
-			const memos: string[] = [];
+			// UI 2: ファイルリスト（Phase 6 動的設定分類）
+			const categoryGroups: Record<string, string[]> = {};
+			this.settings.noteCategories.forEach(cat => {
+				categoryGroups[cat.id] = [];
+			});
 			const others: string[] = [];
 
 			for (const child of parentFolder.children) {
@@ -211,8 +205,7 @@ export default class FolderDashPlugin extends Plugin {
 					const cache = this.app.metadataCache.getFileCache(child);
 					const frontmatter = cache?.frontmatter;
 
-					let isDeliverable = false;
-					let isMemo = false;
+					let matched = false;
 
 					if (frontmatter) {
 						const typeConf = frontmatter['type'] || '';
@@ -220,17 +213,20 @@ export default class FolderDashPlugin extends Plugin {
 						const typeStr = String(typeConf).toLowerCase();
 						const tagsArr = Array.isArray(tagsConf) ? tagsConf.map(t => String(t).toLowerCase()) : [String(tagsConf).toLowerCase()];
 
-						if (['deliverable', '成果物', 'product'].includes(typeStr) || tagsArr.some(t => t.includes('deliverable') || t.includes('成果物'))) {
-							isDeliverable = true;
-						} else if (['memo', 'メモ', 'note'].includes(typeStr) || tagsArr.some(t => t.includes('memo') || t.includes('メモ') || t.includes('note'))) {
-							isMemo = true;
+						for (const cat of this.settings.noteCategories) {
+							if (typeStr === cat.id.toLowerCase() || tagsArr.some(t => t.includes(cat.id.toLowerCase()))) {
+								categoryGroups[cat.id].push(`- [[${child.path}|${child.basename}]]`);
+								matched = true;
+								break;
+							}
 						}
 					}
 
 					const linkItem = `- [[${child.path}|${child.basename}]]`;
-					if (isDeliverable) deliverables.push(linkItem);
-					else if (isMemo) memos.push(linkItem);
-					else others.push(linkItem);
+
+					if (!matched) {
+						others.push(linkItem);
+					}
 				}
 			}
 
@@ -242,11 +238,17 @@ export default class FolderDashPlugin extends Plugin {
 				}
 			};
 
-			if (deliverables.length === 0 && memos.length === 0 && others.length === 0) {
+			let hasFiles = others.length > 0;
+			for (const cat of this.settings.noteCategories) {
+				if (categoryGroups[cat.id].length > 0) hasFiles = true;
+			}
+
+			if (!hasFiles) {
 				el.createEl('p', { text: 'このフォルダには他のMarkdownファイルがありません。' });
 			} else {
-				await renderSection('🌟 成果物 (Deliverables)', deliverables);
-				await renderSection('📝 メモ (Memos)', memos);
+				for (const cat of this.settings.noteCategories) {
+					await renderSection(cat.name, categoryGroups[cat.id]);
+				}
 				await renderSection('📁 その他 (Others)', others);
 			}
 
@@ -260,7 +262,6 @@ export default class FolderDashPlugin extends Plugin {
 					const t = new Date(h.time).toLocaleString();
 					const actionIcon = h.action === 'start' ? '▶' : h.action === 'block' ? '⏸' : h.action === 'complete' ? '✅' : '⏺';
 
-					// Render HTML mapping to visually differentiate the user logic
 					const li = ul.createEl('li');
 					li.innerHTML = `${actionIcon} ${t} - <b>${String(h.action).toUpperCase()}</b>${h.user ? ` by <i>${h.user}</i>` : ''}${h.reason ? ` <span style="color:var(--text-muted)">(理由: ${h.reason})</span>` : ''}`;
 				}
@@ -294,7 +295,6 @@ export default class FolderDashPlugin extends Plugin {
 			const now = new window.Date();
 			const isoString = now.toISOString();
 
-			// Generate the first assignee automatically based on Git Settings
 			const currentUser = await getGitUser(this.app);
 
 			const template = `---
