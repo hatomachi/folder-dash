@@ -64,6 +64,58 @@ class ReasonInputModal extends Modal {
 	}
 }
 
+// Phase 8: ファイル名入力用モーダル
+class FileNameInputModal extends Modal {
+	onSubmit: (result: string) => void;
+	result: string = '';
+	title: string;
+
+	constructor(app: App, title: string, onSubmit: (result: string) => void) {
+		super(app);
+		this.title = title;
+		this.onSubmit = onSubmit;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.createEl('h2', { text: this.title });
+
+		new Setting(contentEl)
+			.setName('ファイル名')
+			.addText((text) =>
+				text.onChange((value) => {
+					this.result = value;
+				}).inputEl.addEventListener('keydown', (e) => {
+					if (e.key === 'Enter') {
+						e.preventDefault();
+						this.close();
+						let finalName = this.result.trim();
+						if (!finalName) finalName = '無題のノート';
+						this.onSubmit(finalName);
+					}
+				})
+			);
+
+		new Setting(contentEl)
+			.addButton((btn) =>
+				btn
+					.setButtonText('作成する')
+					.setCta()
+					.onClick(() => {
+						this.close();
+						let finalName = this.result.trim();
+						if (!finalName) finalName = '無題のノート';
+						this.onSubmit(finalName);
+					})
+			);
+	}
+
+	onClose() {
+		let { contentEl } = this;
+		contentEl.empty();
+	}
+}
+
 
 export default class FolderDashPlugin extends Plugin {
 	settings: FolderDashSettings;
@@ -83,7 +135,7 @@ export default class FolderDashPlugin extends Plugin {
 
 		this.addSettingTab(new FolderDashSettingTab(this.app, this));
 
-		// --- [Phase 2 〜 7: コードブロックプロセッサの登] ---
+		// --- [Phase 2 〜 8: コードブロックプロセッサの登録] ---
 		this.registerMarkdownCodeBlockProcessor("folder-summary", async (source, el, ctx) => {
 			const sourceFile = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
 			if (!(sourceFile instanceof TFile)) return;
@@ -248,28 +300,54 @@ export default class FolderDashPlugin extends Plugin {
 				});
 			};
 
-			const renderSection = async (title: string, items: FileItem[]) => {
+			// Phase 8: ヘッダー＋インライン追加ボタンの描画ロジック
+			const renderSection = async (title: string, items: FileItem[], catId?: string) => {
+				const sectionWrapper = el.createDiv({ cls: 'folder-dash-section', attr: { style: 'margin-top: 20px;' } });
+
+				// タイトルと追加ボタンを含むヘッダーコンテナ
+				const titleHeader = sectionWrapper.createDiv({ attr: { style: 'display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid var(--background-modifier-border); padding-bottom: 5px; margin-bottom: 10px;' } });
+				titleHeader.createEl('h3', { text: title, attr: { style: 'margin: 0;' } });
+
+				// 「＋ 追加」ボタン
+				const addBtn = titleHeader.createEl('button', { text: '＋ 追加', attr: { style: 'font-size: 0.8em; padding: 4px 10px; height: auto;' } });
+				addBtn.onclick = async () => {
+					new FileNameInputModal(this.app, `「${title}」の新規作成`, async (fileName) => {
+						const newFilePath = normalizePath(`${parentFolder.path}/${fileName}.md`);
+						const currentUser = await getGitUser(this.app);
+
+						// 動的にフロントマターを生成
+						let typeProp = catId ? `\ntype: ${catId}` : '';
+						const template = `---
+assignee: ${currentUser}${typeProp}
+---
+# ${fileName}
+`;
+						try {
+							const newFile = await this.app.vault.create(newFilePath, template);
+							await this.app.workspace.getLeaf(false).openFile(newFile as TFile);
+							new Notice(`${fileName}.md を作成しました。`);
+						} catch (e) {
+							console.error(e);
+							new Notice('作成に失敗しました。同名のファイルが存在するか確認してください。');
+						}
+					}).open();
+				};
+
+				// リストアイテムの描画
 				if (items.length > 0) {
 					const formattedStrings = formatAndSortItems(items);
-					const markdownText = `**${title}**\n${formattedStrings.join('\n')}\n`;
-					const wrapper = el.createDiv({ cls: 'folder-dash-section' });
-					await MarkdownRenderer.renderMarkdown(markdownText, wrapper, ctx.sourcePath, this);
+					const markdownText = `${formattedStrings.join('\n')}\n`;
+					const listWrapper = sectionWrapper.createDiv();
+					await MarkdownRenderer.renderMarkdown(markdownText, listWrapper, ctx.sourcePath, this);
+				} else {
+					sectionWrapper.createEl('p', { text: 'アイテムがありません。', attr: { style: 'color: var(--text-muted); font-size: 0.9em; margin-top: 5px;' } });
 				}
 			};
 
-			let hasFiles = others.length > 0;
 			for (const cat of this.settings.noteCategories) {
-				if (categoryGroups[cat.id].length > 0) hasFiles = true;
+				await renderSection(cat.name, categoryGroups[cat.id], cat.id);
 			}
-
-			if (!hasFiles) {
-				el.createEl('p', { text: 'このフォルダには他のMarkdownファイルがありません。' });
-			} else {
-				for (const cat of this.settings.noteCategories) {
-					await renderSection(cat.name, categoryGroups[cat.id]);
-				}
-				await renderSection('📁 その他 (Others)', others);
-			}
+			await renderSection('📁 その他 (Others)', others, undefined); // その他はカテゴリIDなし
 
 			// UI 3: 作業履歴 (History Timeline)
 			const historyObj = sfm['history'] || [];
