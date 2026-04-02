@@ -53,7 +53,15 @@ export default class FolderDashPlugin extends Plugin {
 					for (const leaf of leaves) {
 						const view = leaf.view;
 						if (view instanceof FolderDashView) {
-							view.setFolder(file.parent);
+							view.setFolder(file.parent, file);
+						}
+					}
+				} else {
+					const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_FOLDER_DASH);
+					for (const leaf of leaves) {
+						const view = leaf.view;
+						if (view instanceof FolderDashView) {
+							view.setFolder(null, null);
 						}
 					}
 				}
@@ -83,7 +91,7 @@ export default class FolderDashPlugin extends Plugin {
 					for (const leaf of leaves) {
 						const view = leaf.view;
 						if (view instanceof FolderDashView) {
-							view.setFolder(activeFile.parent);
+							view.setFolder(activeFile.parent, activeFile);
 						}
 					}
 				}

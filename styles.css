@@ -33,3 +33,22 @@
     border-color: var(--background-modifier-border);
     color: var(--text-normal);
 }
+
+/* v2.0.0: Active Note Highlighting */
+.folder-dash-file-item {
+    padding: 6px 10px;
+    margin-left: -10px;
+    border-radius: 6px;
+    border-left: 3px solid transparent;
+    transition: background-color 0.15s ease, border-left-color 0.15s ease;
+}
+
+.folder-dash-file-item.is-active-note {
+    background-color: var(--nav-item-background-active);
+    border-left-color: var(--interactive-accent);
+}
+
+.folder-dash-file-item.is-active-note .internal-link {
+    color: var(--nav-item-color-active);
+    font-weight: bold;
+}

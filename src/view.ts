@@ -104,6 +104,7 @@ interface FileItem { file: TFile, mtime: number, assignee: string }
 export class FolderDashView extends ItemView {
     plugin: FolderDashPlugin;
     currentFolder: TFolder | null = null;
+    activeFile: TFile | null = null;
 
     constructor(leaf: WorkspaceLeaf, plugin: FolderDashPlugin) {
         super(leaf);
@@ -133,11 +134,25 @@ export class FolderDashView extends ItemView {
         // Cleanup if needed
     }
 
-    public async setFolder(folder: TFolder | null) {
+    public async setFolder(folder: TFolder | null, activeFile: TFile | null = null) {
+        this.activeFile = activeFile;
         if (this.currentFolder !== folder) {
             this.currentFolder = folder;
             await this.renderDashboard();
+        } else {
+            this.updateActiveFileHighlight();
         }
+    }
+
+    public updateActiveFileHighlight() {
+        const container = this.contentEl;
+        container.querySelectorAll('li.folder-dash-file-item').forEach(li => {
+            if (this.activeFile && li.getAttribute('data-filepath') === this.activeFile.path) {
+                li.classList.add('is-active-note');
+            } else {
+                li.classList.remove('is-active-note');
+            }
+        });
     }
 
     public async refresh() {
@@ -352,7 +367,11 @@ assignee: ${currentUser}${typeProp}
                 const ul = sectionWrapper.createEl('ul', { attr: { style: 'list-style-type: none; padding-left: 0; margin-top: 5px; margin-bottom: 15px;' } });
 
                 for (const item of items) {
-                    const li = ul.createEl('li', { attr: { style: 'margin-bottom: 8px; display: flex; flex-direction: column;' } });
+                    const isActive = this.activeFile && this.activeFile.path === item.file.path;
+                    const classes = ['folder-dash-file-item'];
+                    if (isActive) classes.push('is-active-note');
+
+                    const li = ul.createEl('li', { cls: classes.join(' '), attr: { 'data-filepath': item.file.path, style: 'margin-bottom: 8px; display: flex; flex-direction: column;' } });
                     const topRow = li.createDiv({ attr: { style: 'display: flex; align-items: center; justify-content: space-between;' } });
 
                     // Main pane File Link
