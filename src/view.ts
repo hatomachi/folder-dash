@@ -6,19 +6,23 @@ export const VIEW_TYPE_FOLDER_DASH = 'folder-dash-view';
 export class ReasonInputModal extends Modal {
     onSubmit: (result: string) => void;
     result: string = '';
+    blockReasons: string[];
 
-    constructor(app: App, onSubmit: (result: string) => void) {
+    constructor(app: App, blockReasons: string[], onSubmit: (result: string) => void) {
         super(app);
         this.onSubmit = onSubmit;
+        this.blockReasons = blockReasons;
     }
 
     onOpen() {
         const { contentEl } = this;
         contentEl.createEl('h2', { text: 'ブロックの理由を入力してください' });
 
+        let textComponent: import("obsidian").TextComponent | null = null;
         new Setting(contentEl)
             .setName('理由')
-            .addText((text) =>
+            .addText((text) => {
+                textComponent = text;
                 text.onChange((value) => {
                     this.result = value;
                 }).inputEl.addEventListener('keydown', (e) => {
@@ -27,8 +31,21 @@ export class ReasonInputModal extends Modal {
                         this.close();
                         this.onSubmit(this.result);
                     }
-                })
-            );
+                });
+            });
+
+        if (this.blockReasons && this.blockReasons.length > 0) {
+            const badgeContainer = contentEl.createDiv({ attr: { style: 'display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; margin-bottom: 20px;' } });
+            for (const reason of this.blockReasons) {
+                const badge = badgeContainer.createEl('button', { text: reason, attr: { style: 'font-size: 0.8em; padding: 4px 8px; height: auto;' } });
+                badge.onclick = () => {
+                    this.result = reason;
+                    if (textComponent) {
+                        textComponent.setValue(reason);
+                    }
+                };
+            }
+        }
 
         new Setting(contentEl)
             .addButton((btn) =>
@@ -63,9 +80,27 @@ export class FileNameInputModal extends Modal {
         const { contentEl } = this;
         contentEl.createEl('h2', { text: this.title });
 
+        let textComponent: import("obsidian").TextComponent | null = null;
+
+        const today = new Date();
+        const yy = String(today.getFullYear()).slice(-2);
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        const dateStr = `${yy}${mm}${dd}_`;
+
+        const badgeContainer = contentEl.createDiv({ attr: { style: 'display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;' } });
+        const badge = badgeContainer.createEl('button', { text: dateStr, attr: { style: 'font-size: 0.8em; padding: 4px 8px; height: auto;' } });
+        badge.onclick = () => {
+            this.result = dateStr + this.result;
+            if (textComponent) {
+                textComponent.setValue(this.result);
+            }
+        };
+
         new Setting(contentEl)
             .setName('ファイル名')
-            .addText((text) =>
+            .addText((text) => {
+                textComponent = text;
                 text.onChange((value) => {
                     this.result = value;
                 }).inputEl.addEventListener('keydown', (e) => {
@@ -76,8 +111,8 @@ export class FileNameInputModal extends Modal {
                         if (!finalName) finalName = '無題のノート';
                         this.onSubmit(finalName);
                     }
-                })
-            );
+                });
+            });
 
         new Setting(contentEl)
             .addButton((btn) =>
@@ -286,7 +321,7 @@ export class FolderDashView extends ItemView {
         startBtn.onclick = () => updateStatus('in-progress', 'start');
         compBtn.onclick = () => updateStatus('completed', 'complete');
         blockBtn.onclick = () => {
-            new ReasonInputModal(this.app, (reason) => {
+            new ReasonInputModal(this.app, this.plugin.settings.blockReasons || [], (reason) => {
                 updateStatus('blocked', 'block', reason || '理由なし');
             }).open();
         };

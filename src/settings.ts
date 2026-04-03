@@ -9,16 +9,19 @@ export interface NoteCategory {
 export interface FolderDashSettings {
 	defaultStatus: string;
 	noteCategories: NoteCategory[];
+	blockReasons: string[];
 }
 
 export const DEFAULT_SETTINGS: FolderDashSettings = {
 	defaultStatus: '着手前',
 	noteCategories: [
 		{ id: 'deliverable', name: '🌟 成果物' },
+		{ id: 'self-check', name: '✅ レビュー前セルフチェックシート' },
 		{ id: 'review', name: '💬 レビュー指摘' },
-		{ id: 'memo', name: '📝 メモ' },
-		{ id: 'self-check', name: '✅ レビュー前セルフチェックシート' }
-	]
+		{ id: 'meeting', name: '📅 打合せ' },
+		{ id: 'memo', name: '📝 メモ' }
+	],
+	blockReasons: ['休憩', '別作業に入るため', '退勤']
 }
 
 export class FolderDashSettingTab extends PluginSettingTab {
@@ -84,6 +87,42 @@ export class FolderDashSettingTab extends PluginSettingTab {
 				.setCta()
 				.onClick(async () => {
 					this.plugin.settings.noteCategories.push({ id: `new-category-${Date.now()}`, name: '新規カテゴリ' });
+					await this.plugin.saveSettings();
+					this.display(); // 再描画
+				})
+			);
+
+		containerEl.createEl('h3', { text: 'ブロック理由の設定' });
+		containerEl.createEl('p', { text: 'ブロックの理由として選択できるバッジの候補を設定します。' });
+
+		this.plugin.settings.blockReasons.forEach((reason, index) => {
+			new Setting(containerEl)
+				.setName(`理由 ${index + 1}`)
+				.addText(text => text
+					.setPlaceholder('理由 (e.g. 休憩)')
+					.setValue(reason)
+					.onChange(async (value) => {
+						this.plugin.settings.blockReasons[index] = value;
+						await this.plugin.saveSettings();
+					})
+				)
+				.addButton(btn => btn
+					.setButtonText('削除')
+					.setWarning()
+					.onClick(async () => {
+						this.plugin.settings.blockReasons.splice(index, 1);
+						await this.plugin.saveSettings();
+						this.display(); // 再描画
+					})
+				);
+		});
+
+		new Setting(containerEl)
+			.addButton(btn => btn
+				.setButtonText('理由を追加')
+				.setCta()
+				.onClick(async () => {
+					this.plugin.settings.blockReasons.push('新しい理由');
 					await this.plugin.saveSettings();
 					this.display(); // 再描画
 				})
