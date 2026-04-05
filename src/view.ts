@@ -893,11 +893,34 @@ latest_update: ""
     renderAgenda(container: HTMLElement, tasks: any[]) {
         const agendaDiv = container.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 20px; padding-bottom: 20px;' } });
 
+        // epicsMap: epicFolderName -> epicFolderPath
+        const epicsMap: Record<string, string> = {};
+        const epicFilePaths = (this.app.metadataCache as any).getCachedFiles().filter((p: string) => p.endsWith(EPIC_MARKER_FILE));
+        for (const epicFilePath of epicFilePaths) {
+            const epicFile = this.app.vault.getAbstractFileByPath(epicFilePath);
+            if (epicFile instanceof TFile && epicFile.parent) {
+                epicsMap[epicFile.parent.name] = epicFile.parent.path;
+            }
+        }
+
+        // Group tasks by their theme
         const grouped: Record<string, typeof tasks> = {};
+        const epicPaths: Record<string, string> = {};
         for (const task of tasks) {
             const arr = grouped[task.theme] || [];
             arr.push(task);
             grouped[task.theme] = arr;
+            if (task.epicPath) epicPaths[task.theme] = task.epicPath;
+        }
+
+        // Ensure all Epics (even empty ones) appear
+        for (const [epicName, epicPath] of Object.entries(epicsMap)) {
+            if (!grouped[epicName]) {
+                grouped[epicName] = [];
+            }
+            if (!epicPaths[epicName]) {
+                epicPaths[epicName] = epicPath;
+            }
         }
 
         const themes = Object.keys(grouped).sort();
@@ -910,8 +933,8 @@ latest_update: ""
 
             const themeTasks = grouped[theme];
 
-            let parentPath = '/';
-            if (themeTasks && themeTasks.length > 0) {
+            let parentPath = epicPaths[theme] || '/';
+            if (parentPath === '/' && themeTasks && themeTasks.length > 0) {
                 const validTask = themeTasks.find(t => t.epicPath && t.epicPath !== '/');
                 parentPath = validTask ? validTask.epicPath : (themeTasks[0].epicPath || '/');
             }
