@@ -358,6 +358,94 @@ export class TaskCreateModal extends Modal {
     }
 }
 
+export class EpicPropertyEditModal extends Modal {
+    onSubmit: (visibility: string, category: string, system: string) => void;
+    visibility: string;
+    category: string;
+    system: string;
+    existingSystems: string[];
+
+    constructor(app: App, initVis: string, initCat: string, initSys: string, existingSystems: string[], onSubmit: (visibility: string, category: string, system: string) => void) {
+        super(app);
+        this.visibility = initVis;
+        this.category = initCat;
+        this.system = initSys;
+        this.existingSystems = existingSystems;
+        this.onSubmit = onSubmit;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('h2', { text: 'エピック属性の編集' });
+        contentEl.createEl('p', { text: '変更して保存すると、属性に応じたフォルダへ自動的に移動します。', attr: { style: 'color: var(--text-muted); font-size: 0.85em; margin-top: -10px; margin-bottom: 20px;' } });
+
+        new Setting(contentEl)
+            .setName('公開範囲')
+            .addDropdown(dropdown => {
+                dropdown.addOption('社員限定', '社員限定');
+                dropdown.addOption('開発会社共用', '開発会社共用');
+                dropdown.setValue(this.visibility);
+                dropdown.onChange(value => this.visibility = value);
+            });
+
+        new Setting(contentEl)
+            .setName('カテゴリ')
+            .addDropdown(dropdown => {
+                dropdown.addOption('維持管理', '維持管理');
+                dropdown.addOption('個別テーマ', '個別テーマ');
+                dropdown.setValue(this.category);
+                dropdown.onChange(value => this.category = value);
+            });
+
+        const datalist = contentEl.createEl('datalist', { attr: { id: 'edit-epic-system-list' } });
+        for (const sys of this.existingSystems) {
+            datalist.createEl('option', { value: sys });
+        }
+
+        new Setting(contentEl)
+            .setName('システム')
+            .addText(text => {
+                text.inputEl.setAttribute('list', 'edit-epic-system-list');
+                text.setValue(this.system);
+                text.onChange(value => {
+                    this.system = value;
+                }).inputEl.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        this.submit();
+                    }
+                });
+            });
+
+        new Setting(contentEl)
+            .addButton((btn) =>
+                btn
+                    .setButtonText('保存')
+                    .setCta()
+                    .onClick(() => this.submit())
+            )
+            .addButton((btn) =>
+                btn
+                    .setButtonText('キャンセル')
+                    .onClick(() => {
+                        this.close();
+                    })
+            );
+    }
+
+    submit() {
+        let sys = this.system.trim();
+        if (!sys) sys = '未分類';
+        this.close();
+        this.onSubmit(this.visibility, this.category, sys);
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
+}
+
 class EpicEditModal extends Modal {
     onSubmit: (overview: string, schedule: string) => void;
     initialOverview: string;
@@ -1174,6 +1262,86 @@ latest_update: ""
                 const epicData = epicsMap[theme];
                 const overviewText = epicData ? epicData.overview : '';
                 const scheduleText = epicData ? epicData.schedule : '';
+
+                if (epicData) {
+                    const badgesRow = titleRow.createDiv({ attr: { style: 'display: flex; gap: 4px; align-items: center; cursor: pointer;' } });
+                    badgesRow.title = "クリックして属性とフォルダパスを編集";
+
+                    const createBadge = (text: string, color: string) => {
+                        badgesRow.createSpan({ text, attr: { style: `font-size: 0.7em; padding: 2px 6px; border-radius: 4px; background: ${color}; color: var(--text-normal); border: 1px solid var(--background-modifier-border);` } });
+                    };
+                    createBadge(epicData.visibility, 'var(--background-secondary-alt)');
+                    createBadge(epicData.category, 'var(--background-secondary-alt)');
+                    createBadge(epicData.system, 'var(--interactive-accent-hover)');
+
+                    badgesRow.onclick = (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        // Find unique systems available from epicsMap
+                        const existingSystems = Array.from(new Set(Object.values(epicsMap)
+                            .map((e: any) => e.system)
+                            .filter(s => s && s !== '未分類')
+                        ));
+
+                        new EpicPropertyEditModal(this.app, epicData.visibility, epicData.category, epicData.system, existingSystems as string[], async (newVis, newCat, newSys) => {
+                            let didChange = false;
+                            let didMove = false;
+
+                            // Check path changes and move directory
+                            const baseFolder = newVis === '社員限定' ? 'nrionly' : 'shared';
+                            const newFolderPath = normalizePath(`${baseFolder}/${newCat}/${newSys}/${theme}`);
+
+                            if (epicData.path !== newFolderPath) {
+                                try {
+                                    // Create intermediate folders if they don't exist
+                                    const parts = newFolderPath.split('/').slice(0, -1);
+                                    let currentPath = '';
+                                    for (const part of parts) {
+                                        if (!part) continue;
+                                        currentPath = currentPath ? `${currentPath}/${part}` : part;
+                                        const existing = this.app.vault.getAbstractFileByPath(currentPath);
+                                        if (!existing) {
+                                            await this.app.vault.createFolder(currentPath);
+                                        }
+                                    }
+
+                                    await this.app.fileManager.renameFile(epicData.file.parent!, newFolderPath);
+                                    didChange = true;
+                                    didMove = true;
+                                    new Notice(`Epicを移動しました: ${newFolderPath}`);
+                                } catch (error) {
+                                    console.error("Folder rename failed:", error);
+                                    new Notice(`フォルダの移動に失敗しました`);
+                                    return; // early return to prevent data desync
+                                }
+                            }
+
+                            // Update frontmatter values if necessary
+                            if (epicData.visibility !== newVis || epicData.category !== newCat || epicData.system !== newSys) {
+                                // Important: if folder moved, we must re-resolve the Epic marker file path, as epicData.file belongs to the old abstraction layer!
+                                let targetFile = epicData.file;
+                                if (didMove) {
+                                    const newEpicFilePath = normalizePath(`${newFolderPath}/${EPIC_MARKER_FILE}`);
+                                    const newlyMovedFile = this.app.vault.getAbstractFileByPath(newEpicFilePath);
+                                    if (newlyMovedFile instanceof TFile) {
+                                        targetFile = newlyMovedFile;
+                                    }
+                                }
+
+                                await this.app.fileManager.processFrontMatter(targetFile, (fm) => {
+                                    fm['visibility'] = newVis;
+                                    fm['category'] = newCat;
+                                    fm['system'] = newSys;
+                                });
+                                didChange = true;
+                            }
+
+                            if (didChange) {
+                                setTimeout(() => this.renderBoard(), 200); // small timeout enables fileCache tracking update
+                            }
+                        }).open();
+                    };
+                }
 
                 if (overviewText || scheduleText) {
                     const metaRow = summaryLeft.createDiv({ attr: { style: 'font-size: 0.85em; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px; margin-top: 6px; white-space: pre-wrap; line-height: 1.4;' } });
