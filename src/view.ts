@@ -204,6 +204,78 @@ export class LatestUpdateModal extends Modal {
     }
 }
 
+export class EpicCreateModal extends Modal {
+    onSubmit: (name: string, basePath: string) => void;
+    epicName: string = '';
+    basePath: string = '';
+
+    constructor(app: App, onSubmit: (name: string, basePath: string) => void) {
+        super(app);
+        this.onSubmit = onSubmit;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('h2', { text: '新規エピックの作成' });
+
+        new Setting(contentEl)
+            .setName('エピック名 (フォルダ名)')
+            .addText((text) =>
+                text.onChange((value) => {
+                    this.epicName = value;
+                }).inputEl.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        this.submit();
+                    }
+                })
+            );
+
+        const folders = this.app.vault.getAllLoadedFiles().filter(f => f instanceof TFolder) as TFolder[];
+        const folderPaths = folders.map(f => f.path);
+
+        new Setting(contentEl)
+            .setName('作成先フォルダ')
+            .setDesc('エピックのフォルダを配置するパスを選択します。')
+            .addDropdown((dropdown) => {
+                dropdown.addOption('/', '/ (Vaultルート)');
+                folderPaths.forEach(p => {
+                    if (p !== '/') dropdown.addOption(p, p);
+                });
+                dropdown.onChange((value) => {
+                    this.basePath = value;
+                });
+            });
+
+        new Setting(contentEl)
+            .addButton((btn) =>
+                btn
+                    .setButtonText('作成')
+                    .setCta()
+                    .onClick(() => this.submit())
+            )
+            .addButton((btn) =>
+                btn
+                    .setButtonText('キャンセル')
+                    .onClick(() => {
+                        this.close();
+                    })
+            );
+    }
+
+    submit() {
+        let name = this.epicName.trim();
+        if (!name) name = '無題のエピック';
+        this.close();
+        this.onSubmit(name, this.basePath || '/');
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
+}
+
 interface FileItem { file: TFile, mtime: number, assignee: string }
 
 export class FolderDashView extends ItemView {
@@ -658,7 +730,34 @@ export class FolderDashBacklogView extends ItemView {
         const headerContainer = container.createDiv({ attr: { style: 'margin-bottom: 20px; padding-top: 10px; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center;' } });
         headerContainer.createEl('h2', { text: 'バックログボード', attr: { style: 'margin: 0;' } });
 
-        const toggleGroup = headerContainer.createDiv({ attr: { style: 'display: flex; gap: 5px; background: var(--background-secondary); padding: 4px; border-radius: 6px;' } });
+        const controlsContainer = headerContainer.createDiv({ attr: { style: 'display: flex; gap: 15px; align-items: center;' } });
+
+        const newEpicBtn = controlsContainer.createEl('button', { text: '＋ 新規エピック作成', cls: 'mod-cta', attr: { style: 'padding: 4px 12px; height: auto;' } });
+        newEpicBtn.onclick = () => {
+            new EpicCreateModal(this.app, async (name, basePath) => {
+                const folderPath = basePath === '/' ? normalizePath(name) : normalizePath(`${basePath}/${name}`);
+                try {
+                    await this.app.vault.createFolder(folderPath);
+                    const epicFilePath = normalizePath(`${folderPath}/${EPIC_MARKER_FILE}`);
+                    const now = new Date().toISOString();
+                    const content = `---
+title: "${name}"
+status: "未着手"
+created_at: "${now}"
+latest_update: ""
+---
+`;
+                    await this.app.vault.create(epicFilePath, content);
+                    new Notice(`エピック「${name}」を作成しました`);
+                    this.renderBoard();
+                } catch (e: any) {
+                    console.error(e);
+                    new Notice(`作成失敗: 同名のフォルダが既に存在する可能性があります`);
+                }
+            }).open();
+        };
+
+        const toggleGroup = controlsContainer.createDiv({ attr: { style: 'display: flex; gap: 5px; background: var(--background-secondary); padding: 4px; border-radius: 6px;' } });
 
         const activeStyle = 'background-color: var(--interactive-accent); color: var(--text-on-accent); padding: 4px 12px; border-radius: 4px; border: none; cursor: pointer; font-size: 0.9em;';
         const inactiveStyle = 'background-color: transparent; color: var(--text-muted); padding: 4px 12px; border-radius: 4px; border: none; cursor: pointer; font-size: 0.9em;';
