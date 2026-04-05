@@ -353,16 +353,40 @@ class EpicEditModal extends Modal {
         contentEl.empty();
         contentEl.createEl('h2', { text: 'Epic情報の編集', attr: { style: 'margin-bottom: 20px;' } });
 
+        const wrapText = (textArea: HTMLTextAreaElement, color: string) => {
+            const start = textArea.selectionStart;
+            const end = textArea.selectionEnd;
+            const text = textArea.value;
+            const selectedText = text.substring(start, end);
+            if (!selectedText) {
+                new Notice('テキストを選択してください');
+                return;
+            }
+            const before = text.substring(0, start);
+            const after = text.substring(end);
+            textArea.value = `${before}<span style="color: ${color};">${selectedText}</span>${after}`;
+            textArea.focus();
+            textArea.setSelectionRange(start, start + selectedText.length + 23 + color.length + 9);
+        };
+
+        const createToolbar = (parent: HTMLElement, textArea: HTMLTextAreaElement) => {
+            const toolbar = parent.createDiv({ attr: { style: 'display: flex; gap: 8px; margin-bottom: 8px;' } });
+            const redBtn = toolbar.createEl('button', { text: '🔴 赤字', attr: { style: 'font-size: 0.8em; padding: 4px 8px; height: auto;' } });
+            redBtn.onclick = () => wrapText(textArea, 'red');
+            const blueBtn = toolbar.createEl('button', { text: '🔵 青字', attr: { style: 'font-size: 0.8em; padding: 4px 8px; height: auto;' } });
+            blueBtn.onclick = () => wrapText(textArea, 'blue');
+        };
+
         contentEl.createEl('h4', { text: '概況 (overview)', attr: { style: 'margin-bottom: 5px;' } });
-        this.overviewTextarea = contentEl.createEl('textarea', {
+        createToolbar(contentEl, this.overviewTextarea = contentEl.createEl('textarea', {
             attr: { style: 'width: 100%; height: 80px; margin-bottom: 15px; resize: vertical;' }
-        });
+        }));
         this.overviewTextarea.value = this.initialOverview;
 
         contentEl.createEl('h4', { text: 'スケジュール (schedule)', attr: { style: 'margin-bottom: 5px;' } });
-        this.scheduleTextarea = contentEl.createEl('textarea', {
+        createToolbar(contentEl, this.scheduleTextarea = contentEl.createEl('textarea', {
             attr: { style: 'width: 100%; height: 80px; margin-bottom: 15px; resize: vertical;' }
-        });
+        }));
         this.scheduleTextarea.value = this.initialSchedule;
 
         new Setting(contentEl)
@@ -832,7 +856,7 @@ export class FolderDashBacklogView extends ItemView {
         await this.renderBoard();
 
         this.registerEvent(this.app.metadataCache.on('changed', (file) => {
-            if (file.name === TASK_MARKER_FILE) {
+            if (file.name === TASK_MARKER_FILE || file.name === EPIC_MARKER_FILE) {
                 setTimeout(() => this.renderBoard(), 150);
             }
         }));
@@ -911,6 +935,21 @@ export class FolderDashBacklogView extends ItemView {
 
         kanbanBtn.onclick = () => { this.currentMode = 'kanban'; this.renderBoard(); };
         agendaBtn.onclick = () => { this.currentMode = 'agenda'; this.renderBoard(); };
+
+        if (this.currentMode === 'agenda') {
+            const toggleAllBtn = controlsContainer.createEl('button', { text: '↕️ 一括開閉', attr: { style: 'background-color: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted);' } });
+            toggleAllBtn.onclick = () => {
+                const detailsNodes = container.querySelectorAll('details');
+                const anyOpen = Array.from(detailsNodes).some(d => d.hasAttribute('open'));
+                detailsNodes.forEach(d => {
+                    if (anyOpen) {
+                        d.removeAttribute('open');
+                    } else {
+                        d.setAttribute('open', 'true');
+                    }
+                });
+            };
+        }
 
         const newEpicBtn = controlsContainer.createEl('button', { text: '＋ 新規エピック', cls: 'mod-cta', attr: { style: 'padding: 4px 12px; height: auto;' } });
         newEpicBtn.onclick = () => {
@@ -1035,10 +1074,12 @@ latest_update: ""
             if (overviewText || scheduleText) {
                 const metaRow = summaryLeft.createDiv({ attr: { style: 'font-size: 0.85em; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px; margin-top: 6px; white-space: pre-wrap; line-height: 1.4;' } });
                 if (overviewText) {
-                    metaRow.createDiv({ text: `概況: ${overviewText}` });
+                    const row = metaRow.createDiv();
+                    row.innerHTML = `概況: ${overviewText}`;
                 }
                 if (scheduleText) {
-                    metaRow.createDiv({ text: `スケジュール: ${scheduleText}` });
+                    const row = metaRow.createDiv();
+                    row.innerHTML = `スケジュール: ${scheduleText}`;
                 }
             }
 
