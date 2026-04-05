@@ -538,6 +538,7 @@ export async function updateSummaryStatus(
 
 export class FolderDashBacklogView extends ItemView {
     plugin: FolderDashPlugin;
+    currentMode: 'kanban' | 'agenda' = 'kanban';
 
     constructor(leaf: WorkspaceLeaf, plugin: FolderDashPlugin) {
         super(leaf);
@@ -571,14 +572,23 @@ export class FolderDashBacklogView extends ItemView {
         container.empty();
         container.classList.add('folder-dash-board-view');
 
-        container.createEl('h2', {
-            text: 'バックログボード',
-            attr: { style: 'margin-bottom: 20px; padding-top: 10px; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 10px;' }
-        });
+        const headerContainer = container.createDiv({ attr: { style: 'margin-bottom: 20px; padding-top: 10px; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center;' } });
+        headerContainer.createEl('h2', { text: 'バックログボード', attr: { style: 'margin: 0;' } });
+
+        const toggleGroup = headerContainer.createDiv({ attr: { style: 'display: flex; gap: 5px; background: var(--background-secondary); padding: 4px; border-radius: 6px;' } });
+
+        const activeStyle = 'background-color: var(--interactive-accent); color: var(--text-on-accent); padding: 4px 12px; border-radius: 4px; border: none; cursor: pointer; font-size: 0.9em;';
+        const inactiveStyle = 'background-color: transparent; color: var(--text-muted); padding: 4px 12px; border-radius: 4px; border: none; cursor: pointer; font-size: 0.9em;';
+
+        const kanbanBtn = toggleGroup.createEl('button', { text: 'Kanban', attr: { style: this.currentMode === 'kanban' ? activeStyle : inactiveStyle } });
+        const agendaBtn = toggleGroup.createEl('button', { text: 'Agenda', attr: { style: this.currentMode === 'agenda' ? activeStyle : inactiveStyle } });
+
+        kanbanBtn.onclick = () => { this.currentMode = 'kanban'; this.renderBoard(); };
+        agendaBtn.onclick = () => { this.currentMode = 'agenda'; this.renderBoard(); };
 
         const summaryPaths = (this.app.metadataCache as any).getCachedFiles().filter((path: string) => path.endsWith('_Summary.md'));
 
-        type TaskData = { file: TFile, name: string, status: string, assignee: string, mtime: number };
+        type TaskData = { file: TFile, name: string, status: string, assignee: string, mtime: number, theme: string, latestUpdate: string };
         const tasks: TaskData[] = [];
 
         for (const path of summaryPaths) {
@@ -590,11 +600,24 @@ export class FolderDashBacklogView extends ItemView {
                     const title = fm['title'] || abstractFile.parent?.name || '無題のタスク';
                     const status = fm['status'] || 'not-started';
                     const assignee = fm['assignee'] || '未設定';
-                    tasks.push({ file: abstractFile, name: title, status, assignee, mtime: abstractFile.stat.mtime });
+                    let theme = fm['theme'] || fm['epic'];
+                    if (!theme) {
+                        theme = abstractFile.parent?.parent?.name || '未分類';
+                    }
+                    const latestUpdate = fm['latest_update'] || '';
+                    tasks.push({ file: abstractFile, name: title, status, assignee, mtime: abstractFile.stat.mtime, theme, latestUpdate });
                 }
             }
         }
 
+        if (this.currentMode === 'kanban') {
+            this.renderKanban(container, tasks);
+        } else {
+            this.renderAgenda(container, tasks);
+        }
+    }
+
+    renderKanban(container: HTMLElement, tasks: any[]) {
         const columns = [
             { id: 'not-started', label: '未着手 (Not Started)' },
             { id: 'in-progress', label: '進行中 (In Progress)' },
@@ -615,45 +638,97 @@ export class FolderDashBacklogView extends ItemView {
             header.createSpan({ text: String(colItems.length), attr: { style: 'background: var(--background-modifier-border); padding: 2px 8px; border-radius: 12px; font-size: 0.8em; color: var(--text-muted);' } });
 
             for (const task of colItems) {
-                const card = colDiv.createDiv({ attr: { style: 'background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);' } });
+                this.renderTaskCard(colDiv, task, 'kanban');
+            }
+        }
+    }
 
-                const titleLink = card.createEl('a', { text: task.name, cls: 'internal-link', attr: { style: 'font-weight: bold; cursor: pointer; text-decoration: none; display: block; margin-bottom: 4px;' } });
-                titleLink.onclick = (e) => {
-                    e.preventDefault();
-                    this.app.workspace.getLeaf(false).openFile(task.file);
-                };
+    renderAgenda(container: HTMLElement, tasks: any[]) {
+        const agendaDiv = container.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 20px; padding-bottom: 20px;' } });
 
-                card.createDiv({ text: `👤 担当: ${task.assignee}`, attr: { style: 'font-size: 0.8em; color: var(--text-muted);' } });
+        const grouped: Record<string, typeof tasks> = {};
+        for (const task of tasks) {
+            const arr = grouped[task.theme] || [];
+            arr.push(task);
+            grouped[task.theme] = arr;
+        }
 
-                const actionsDiv = card.createDiv({ attr: { style: 'display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px;' } });
+        const themes = Object.keys(grouped).sort();
 
-                const createQuickBtn = (label: string, newStatus: string, actionName: string, btnStyle: string = '') => {
-                    const btn = actionsDiv.createEl('button', { text: label, attr: { style: `font-size: 0.75em; padding: 4px 8px; height: auto; ${btnStyle}` } });
-                    btn.onclick = async () => {
-                        await updateSummaryStatus(this.app, this.plugin, task.file, newStatus, actionName);
-                        this.renderBoard();
-                    };
-                    return btn;
-                };
+        for (const theme of themes) {
+            const themeDiv = agendaDiv.createDiv({ attr: { style: 'background: var(--background-secondary); border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 10px;' } });
+            themeDiv.createEl('h3', { text: `📁 ${theme}`, attr: { style: 'margin: 0 0 10px 0; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 5px;' } });
 
-                if (task.status === 'not-started') {
-                    createQuickBtn('▶ 着手', 'in-progress', 'start', 'background-color: var(--interactive-accent); color: var(--text-on-accent);');
-                } else if (task.status === 'in-progress') {
-                    const blockBtn = actionsDiv.createEl('button', { text: '⏸ ブロック', attr: { style: 'font-size: 0.75em; padding: 4px 8px; height: auto;' } });
-                    blockBtn.onclick = async () => {
-                        new ReasonInputModal(this.app, this.plugin.settings.blockReasons || [], async (reason) => {
-                            await updateSummaryStatus(this.app, this.plugin, task.file, 'blocked', 'block', reason || '理由なし');
-                            this.renderBoard();
-                        }).open();
-                    };
-                    createQuickBtn('✅ 完了', 'completed', 'complete');
-                } else if (task.status === 'blocked') {
-                    createQuickBtn('▶ 再開', 'in-progress', 'start', 'background-color: var(--interactive-accent); color: var(--text-on-accent);');
-                    createQuickBtn('✅ 完了', 'completed', 'complete');
-                } else if (task.status === 'completed') {
-                    createQuickBtn('↩︎ 再開', 'in-progress', 'start');
+            const themeTasks = grouped[theme];
+            if (themeTasks) {
+                themeTasks.sort((a, b) => b.mtime - a.mtime);
+
+                for (const task of themeTasks) {
+                    this.renderTaskCard(themeDiv, task, 'agenda');
                 }
             }
+        }
+    }
+
+    renderTaskCard(parentDiv: HTMLElement, task: any, viewMode: 'kanban' | 'agenda') {
+        const cardStyle = viewMode === 'kanban'
+            ? 'background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);'
+            : 'background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 12px; display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);';
+
+        const card = parentDiv.createDiv({ attr: { style: cardStyle } });
+
+        const mainContent = card.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 4px; flex-grow: 1;' } });
+
+        const topRow = mainContent.createDiv({ attr: { style: 'display: flex; align-items: center; gap: 10px; flex-wrap: wrap;' } });
+
+        const statusMap: Record<string, string> = {
+            'not-started': '⭕️ 未着手',
+            'in-progress': '🏃 進行中',
+            'blocked': '🛑 ブロック',
+            'completed': '✅ 完了'
+        };
+        const statusText = statusMap[task.status] || task.status;
+        topRow.createSpan({ text: statusText, attr: { style: 'font-size: 0.8em; background: var(--background-modifier-border); padding: 2px 6px; border-radius: 4px; white-space: nowrap;' } });
+
+        const titleLink = topRow.createEl('a', { text: task.name, cls: 'internal-link', attr: { style: 'font-weight: bold; cursor: pointer; text-decoration: none;' } });
+        titleLink.onclick = (e) => {
+            e.preventDefault();
+            this.app.workspace.getLeaf(false).openFile(task.file);
+        };
+
+        topRow.createSpan({ text: `👤 担当: ${task.assignee}`, attr: { style: 'font-size: 0.8em; color: var(--text-muted); margin-left: 10px;' } });
+
+        if (viewMode === 'agenda' && task.latestUpdate) {
+            mainContent.createDiv({ text: `� ${task.latestUpdate}`, attr: { style: 'font-size: 0.85em; color: var(--text-normal); margin-top: 4px; padding-left: 5px; border-left: 2px solid var(--interactive-accent);' } });
+        }
+
+        const actionsDiv = card.createDiv({ attr: { style: 'display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: flex-end; min-width: max-content;' } });
+
+        const createQuickBtn = (label: string, newStatus: string, actionName: string, btnStyle: string = '') => {
+            const btn = actionsDiv.createEl('button', { text: label, attr: { style: `font-size: 0.75em; padding: 4px 8px; height: auto; ${btnStyle}` } });
+            btn.onclick = async () => {
+                await updateSummaryStatus(this.app, this.plugin, task.file, newStatus, actionName);
+                this.renderBoard();
+            };
+            return btn;
+        };
+
+        if (task.status === 'not-started') {
+            createQuickBtn('▶ 着手', 'in-progress', 'start', 'background-color: var(--interactive-accent); color: var(--text-on-accent);');
+        } else if (task.status === 'in-progress') {
+            const blockBtn = actionsDiv.createEl('button', { text: '⏸ ブロック', attr: { style: 'font-size: 0.75em; padding: 4px 8px; height: auto;' } });
+            blockBtn.onclick = async () => {
+                new ReasonInputModal(this.app, this.plugin.settings.blockReasons || [], async (reason) => {
+                    await updateSummaryStatus(this.app, this.plugin, task.file, 'blocked', 'block', reason || '理由なし');
+                    this.renderBoard();
+                }).open();
+            };
+            createQuickBtn('✅ 完了', 'completed', 'complete');
+        } else if (task.status === 'blocked') {
+            createQuickBtn('▶ 再開', 'in-progress', 'start', 'background-color: var(--interactive-accent); color: var(--text-on-accent);');
+            createQuickBtn('✅ 完了', 'completed', 'complete');
+        } else if (task.status === 'completed') {
+            createQuickBtn('↩︎ 再開', 'in-progress', 'start');
         }
     }
 }
