@@ -4,6 +4,9 @@ import FolderDashPlugin from './main';
 export const VIEW_TYPE_FOLDER_DASH = 'folder-dash-view';
 export const VIEW_TYPE_BACKLOG_BOARD = 'folder-dash-backlog-view';
 
+export const TASK_MARKER_FILE = '_Task.md';
+export const EPIC_MARKER_FILE = '_Epic.md';
+
 export class ReasonInputModal extends Modal {
     onSubmit: (result: string) => void;
     result: string = '';
@@ -274,13 +277,13 @@ export class FolderDashView extends ItemView {
         const parentFolder = this.currentFolder;
         container.createEl('h2', { text: `${parentFolder.name}`, attr: { style: 'margin-bottom: 20px;' } });
 
-        const summaryFilePath = normalizePath(`${parentFolder.path}/_Summary.md`);
+        const summaryFilePath = normalizePath(`${parentFolder.path}/${TASK_MARKER_FILE}`);
         const summaryFile = this.app.vault.getAbstractFileByPath(summaryFilePath);
 
         if (!(summaryFile instanceof TFile)) {
             const wrapper = container.createDiv({ attr: { style: 'text-align: center;' } });
-            wrapper.createEl('p', { text: 'このフォルダにはまとめノート (_Summary.md) がありません。' });
-            const btn = wrapper.createEl('button', { text: 'まとめノートを作成する', cls: 'mod-cta' });
+            wrapper.createEl('p', { text: `このフォルダにはタスクノート (${TASK_MARKER_FILE}) がありません。` });
+            const btn = wrapper.createEl('button', { text: 'タスクノートを作成する', cls: 'mod-cta' });
             btn.onclick = async () => {
                 await this.plugin.createOrOpenSummaryNoteForFolder(parentFolder);
                 await this.refresh();
@@ -401,7 +404,7 @@ export class FolderDashView extends ItemView {
         const others: FileItem[] = [];
 
         for (const child of parentFolder.children) {
-            if (child instanceof TFile && child.extension === 'md' && child.name !== '_Summary.md') {
+            if (child instanceof TFile && child.extension === 'md' && child.name !== TASK_MARKER_FILE && child.name !== EPIC_MARKER_FILE) {
                 const cache = this.app.metadataCache.getFileCache(child);
                 const frontmatter = cache?.frontmatter;
 
@@ -623,11 +626,25 @@ export class FolderDashBacklogView extends ItemView {
         return 'kanban-square';
     }
 
+    getEpicForTask(taskFile: TFile): string {
+        let currentFolder = taskFile.parent;
+        while (currentFolder) {
+            const prefix = currentFolder.path === '/' ? '' : currentFolder.path;
+            const epicPath = normalizePath(`${prefix}/${EPIC_MARKER_FILE}`);
+            const epicFile = this.app.vault.getAbstractFileByPath(epicPath);
+            if (epicFile instanceof TFile) {
+                return currentFolder.name;
+            }
+            currentFolder = currentFolder.parent;
+        }
+        return '';
+    }
+
     async onOpen() {
         await this.renderBoard();
 
         this.registerEvent(this.app.metadataCache.on('changed', (file) => {
-            if (file.name === '_Summary.md') {
+            if (file.name === TASK_MARKER_FILE) {
                 setTimeout(() => this.renderBoard(), 150);
             }
         }));
@@ -652,7 +669,7 @@ export class FolderDashBacklogView extends ItemView {
         kanbanBtn.onclick = () => { this.currentMode = 'kanban'; this.renderBoard(); };
         agendaBtn.onclick = () => { this.currentMode = 'agenda'; this.renderBoard(); };
 
-        const summaryPaths = (this.app.metadataCache as any).getCachedFiles().filter((path: string) => path.endsWith('_Summary.md'));
+        const summaryPaths = (this.app.metadataCache as any).getCachedFiles().filter((path: string) => path.endsWith(TASK_MARKER_FILE));
 
         type TaskData = { file: TFile, name: string, status: string, assignee: string, mtime: number, theme: string, latestUpdate: string };
         const tasks: TaskData[] = [];
@@ -668,7 +685,7 @@ export class FolderDashBacklogView extends ItemView {
                     const assignee = fm['assignee'] || '未設定';
                     let theme = fm['theme'] || fm['epic'];
                     if (!theme) {
-                        theme = abstractFile.parent?.parent?.name || '未分類';
+                        theme = this.getEpicForTask(abstractFile) || abstractFile.parent?.parent?.name || '未分類';
                     }
                     const latestUpdate = fm['latest_update'] || '';
                     tasks.push({ file: abstractFile, name: title, status, assignee, mtime: abstractFile.stat.mtime, theme, latestUpdate });

@@ -2,7 +2,7 @@ import { App, Notice, Plugin, TFile, TFolder, normalizePath } from 'obsidian';
 import { DEFAULT_SETTINGS, FolderDashSettings, FolderDashSettingTab } from "./settings";
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { VIEW_TYPE_FOLDER_DASH, FolderDashView, VIEW_TYPE_BACKLOG_BOARD, FolderDashBacklogView } from './view';
+import { VIEW_TYPE_FOLDER_DASH, FolderDashView, VIEW_TYPE_BACKLOG_BOARD, FolderDashBacklogView, TASK_MARKER_FILE } from './view';
 
 const execPromise = promisify(exec);
 
@@ -46,7 +46,7 @@ export default class FolderDashPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'create-open-folder-summary',
-			name: '現在のフォルダにまとめノートを作成/開く',
+			name: '現在のフォルダにタスクノートを作成/開く',
 			callback: () => this.createOrOpenSummaryNote(),
 		});
 
@@ -141,7 +141,7 @@ export default class FolderDashPlugin extends Plugin {
 	}
 
 	async createOrOpenSummaryNoteForFolder(parentFolder: TFolder) {
-		const summaryFileName = '_Summary.md';
+		const summaryFileName = TASK_MARKER_FILE;
 		const summaryFilePath = normalizePath(`${parentFolder.path}/${summaryFileName}`);
 		let summaryFile = this.app.vault.getAbstractFileByPath(summaryFilePath);
 
@@ -168,8 +168,8 @@ block_time_minutes: 0
 				const newFile = await this.app.vault.create(summaryFilePath, template);
 				new Notice(`${summaryFileName} を作成しました。`);
 			} catch (error) {
-				console.error('まとめノートの作成に失敗しました:', error);
-				new Notice('まとめノートの作成に失敗しました。');
+				console.error('タスクノートの作成に失敗しました:', error);
+				new Notice('タスクノートの作成に失敗しました。');
 			}
 		}
 	}
