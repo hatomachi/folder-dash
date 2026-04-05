@@ -205,18 +205,57 @@ export class LatestUpdateModal extends Modal {
 }
 
 export class EpicCreateModal extends Modal {
-    onSubmit: (name: string, basePath: string) => void;
+    onSubmit: (name: string, visibility: string, category: string, system: string) => void;
     epicName: string = '';
-    basePath: string = '';
+    visibility: string = '社員限定';
+    category: string = '維持管理';
+    system: string = '';
+    existingSystems: string[];
 
-    constructor(app: App, onSubmit: (name: string, basePath: string) => void) {
+    constructor(app: App, existingSystems: string[], onSubmit: (name: string, visibility: string, category: string, system: string) => void) {
         super(app);
+        this.existingSystems = existingSystems;
         this.onSubmit = onSubmit;
     }
 
     onOpen() {
         const { contentEl } = this;
         contentEl.createEl('h2', { text: '新規エピックの作成' });
+
+        new Setting(contentEl)
+            .setName('公開範囲')
+            .addDropdown(dropdown => {
+                dropdown.addOption('社員限定', '社員限定');
+                dropdown.addOption('開発会社共用', '開発会社共用');
+                dropdown.onChange(value => this.visibility = value);
+            });
+
+        new Setting(contentEl)
+            .setName('カテゴリ')
+            .addDropdown(dropdown => {
+                dropdown.addOption('維持管理', '維持管理');
+                dropdown.addOption('個別テーマ', '個別テーマ');
+                dropdown.onChange(value => this.category = value);
+            });
+
+        const datalist = contentEl.createEl('datalist', { attr: { id: 'epic-system-list' } });
+        for (const sys of this.existingSystems) {
+            datalist.createEl('option', { value: sys });
+        }
+
+        new Setting(contentEl)
+            .setName('システム')
+            .addText(text => {
+                text.inputEl.setAttribute('list', 'epic-system-list');
+                text.onChange(value => {
+                    this.system = value;
+                }).inputEl.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        this.submit();
+                    }
+                });
+            });
 
         new Setting(contentEl)
             .setName('エピック名 (フォルダ名)')
@@ -230,22 +269,6 @@ export class EpicCreateModal extends Modal {
                     }
                 })
             );
-
-        const folders = this.app.vault.getAllLoadedFiles().filter(f => f instanceof TFolder) as TFolder[];
-        const folderPaths = folders.map(f => f.path);
-
-        new Setting(contentEl)
-            .setName('作成先フォルダ')
-            .setDesc('エピックのフォルダを配置するパスを選択します。')
-            .addDropdown((dropdown) => {
-                dropdown.addOption('/', '/ (Vaultルート)');
-                folderPaths.forEach(p => {
-                    if (p !== '/') dropdown.addOption(p, p);
-                });
-                dropdown.onChange((value) => {
-                    this.basePath = value;
-                });
-            });
 
         new Setting(contentEl)
             .addButton((btn) =>
@@ -266,8 +289,10 @@ export class EpicCreateModal extends Modal {
     submit() {
         let name = this.epicName.trim();
         if (!name) name = '無題のエピック';
+        let sys = this.system.trim();
+        if (!sys) sys = '未分類';
         this.close();
-        this.onSubmit(name, this.basePath || '/');
+        this.onSubmit(name, this.visibility, this.category, sys);
     }
 
     onClose() {
@@ -275,7 +300,6 @@ export class EpicCreateModal extends Modal {
         contentEl.empty();
     }
 }
-
 export class TaskCreateModal extends Modal {
     onSubmit: (name: string) => void;
     taskName: string = '';
@@ -819,6 +843,8 @@ export class FolderDashBacklogView extends ItemView {
     plugin: FolderDashPlugin;
     currentMode: 'kanban' | 'agenda' = 'agenda';
     selectedAssignee: string = 'All';
+    selectedSystem: string = 'All';
+    selectedVisibility: string = 'All';
     doTodayFilterEnabled: boolean = false;
 
     constructor(leaf: WorkspaceLeaf, plugin: FolderDashPlugin) {
@@ -869,7 +895,34 @@ export class FolderDashBacklogView extends ItemView {
 
         const summaryPaths = (this.app.metadataCache as any).getCachedFiles().filter((path: string) => path.endsWith(TASK_MARKER_FILE));
 
-        type TaskData = { file: TFile, name: string, status: string, assignee: string, mtime: number, theme: string, epicPath: string, latestUpdate: string, do_today: boolean };
+        type EpicData = { path: string, overview: string, schedule: string, file: TFile, visibility: string, category: string, system: string };
+        const epicsMap: Record<string, EpicData> = {};
+        const epicFilePaths = (this.app.metadataCache as any).getCachedFiles().filter((p: string) => p.endsWith(EPIC_MARKER_FILE));
+        const uniqueSystems = new Set<string>();
+        const uniqueVisibilities = new Set<string>();
+
+        for (const epicFilePath of epicFilePaths) {
+            const epicFile = this.app.vault.getAbstractFileByPath(epicFilePath);
+            if (epicFile instanceof TFile && epicFile.parent) {
+                const cache = this.app.metadataCache.getFileCache(epicFile);
+                const fm = cache?.frontmatter || {};
+                const visibility = fm['visibility'] || '社員限定';
+                const category = fm['category'] || '維持管理';
+                const system = fm['system'] || '未分類';
+
+                epicsMap[epicFile.parent.name] = {
+                    path: epicFile.parent.path,
+                    overview: fm['overview'] || '',
+                    schedule: fm['schedule'] || '',
+                    file: epicFile,
+                    visibility, category, system
+                };
+                if (system && system !== '未分類') uniqueSystems.add(system);
+                if (visibility) uniqueVisibilities.add(visibility);
+            }
+        }
+
+        type TaskData = { file: TFile, name: string, status: string, assignee: string, mtime: number, theme: string, epicPath: string, latestUpdate: string, do_today: boolean, epicCategory: string };
         const allTasks: TaskData[] = [];
         const uniqueAssignees = new Set<string>();
 
@@ -896,12 +949,17 @@ export class FolderDashBacklogView extends ItemView {
                     }
 
                     const latestUpdate = fm['latest_update'] || '';
-                    allTasks.push({ file: abstractFile, name: title, status, assignee, mtime: abstractFile.stat.mtime, theme, epicPath, latestUpdate, do_today });
+                    const epicInfoData = epicsMap[theme];
+                    const epicCategory = epicInfoData ? epicInfoData.category : 'その他';
+
+                    allTasks.push({ file: abstractFile, name: title, status, assignee, mtime: abstractFile.stat.mtime, theme, epicPath, latestUpdate, do_today, epicCategory });
                 }
             }
         }
 
         const assigneesArray = Array.from(uniqueAssignees).sort();
+        const systemsArray = Array.from(uniqueSystems).sort();
+        const visibilitiesArray = Array.from(uniqueVisibilities).sort();
 
         const headerContainer = container.createDiv({ attr: { style: 'margin-bottom: 20px; padding-top: 10px; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;' } });
         headerContainer.createEl('h2', { text: 'バックログボード', attr: { style: 'margin: 0;' } });
@@ -916,6 +974,28 @@ export class FolderDashBacklogView extends ItemView {
         }
         assigneeSelect.onchange = () => {
             this.selectedAssignee = assigneeSelect.value;
+            this.renderBoard();
+        };
+
+        const systemSelect = controlsContainer.createEl('select', { attr: { style: 'padding: 4px 8px; border-radius: 4px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); color: var(--text-normal);' } });
+        systemSelect.createEl('option', { value: 'All', text: '🌐 システム (All)' });
+        for (const sys of systemsArray) {
+            const opt = systemSelect.createEl('option', { value: sys, text: sys });
+            if (this.selectedSystem === sys) opt.selected = true;
+        }
+        systemSelect.onchange = () => {
+            this.selectedSystem = systemSelect.value;
+            this.renderBoard();
+        };
+
+        const visibilitySelect = controlsContainer.createEl('select', { attr: { style: 'padding: 4px 8px; border-radius: 4px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); color: var(--text-normal);' } });
+        visibilitySelect.createEl('option', { value: 'All', text: '🔒 公開範囲 (All)' });
+        for (const vis of visibilitiesArray) {
+            const opt = visibilitySelect.createEl('option', { value: vis, text: vis });
+            if (this.selectedVisibility === vis) opt.selected = true;
+        }
+        visibilitySelect.onchange = () => {
+            this.selectedVisibility = visibilitySelect.value;
             this.renderBoard();
         };
 
@@ -953,15 +1033,31 @@ export class FolderDashBacklogView extends ItemView {
 
         const newEpicBtn = controlsContainer.createEl('button', { text: '＋ 新規エピック', cls: 'mod-cta', attr: { style: 'padding: 4px 12px; height: auto;' } });
         newEpicBtn.onclick = () => {
-            new EpicCreateModal(this.app, async (name, basePath) => {
-                const folderPath = basePath === '/' ? normalizePath(name) : normalizePath(`${basePath}/${name}`);
+            new EpicCreateModal(this.app, systemsArray, async (name, visibility, category, system) => {
+                const baseFolder = visibility === '社員限定' ? 'nrionly' : 'shared';
+                const folderPath = normalizePath(`${baseFolder}/${category}/${system}/${name}`);
+
                 try {
-                    await this.app.vault.createFolder(folderPath);
+                    // Create intermediate folders if they don't exist
+                    const parts = folderPath.split('/');
+                    let currentPath = '';
+                    for (const part of parts) {
+                        if (!part) continue;
+                        currentPath = currentPath ? `${currentPath}/${part}` : part;
+                        const existing = this.app.vault.getAbstractFileByPath(currentPath);
+                        if (!existing) {
+                            await this.app.vault.createFolder(currentPath);
+                        }
+                    }
+
                     const epicFilePath = normalizePath(`${folderPath}/${EPIC_MARKER_FILE}`);
                     const now = new Date().toISOString();
                     const content = `---
 title: "${name}"
 status: "未着手"
+visibility: "${visibility}"
+category: "${category}"
+system: "${system}"
 created_at: "${now}"
 latest_update: ""
 ---
@@ -971,7 +1067,7 @@ latest_update: ""
                     this.renderBoard();
                 } catch (e: any) {
                     console.error(e);
-                    new Notice(`作成失敗: 同名のフォルダが既に存在する可能性があります`);
+                    new Notice(`作成失敗: フォルダ作成中にエラーが発生しました`);
                 }
             }).open();
         };
@@ -979,13 +1075,27 @@ latest_update: ""
         const tasks = allTasks.filter(task => {
             if (this.selectedAssignee !== 'All' && task.assignee !== this.selectedAssignee) return false;
             if (this.doTodayFilterEnabled && !task.do_today) return false;
+
+            const epicData = epicsMap[task.theme];
+            if (this.selectedSystem !== 'All' && (!epicData || epicData.system !== this.selectedSystem)) return false;
+            if (this.selectedVisibility !== 'All' && (!epicData || epicData.visibility !== this.selectedVisibility)) return false;
+
             return true;
         });
+
+        // Also filter epicsMap so empty Epics won't show up if filtered out
+        for (const [themeName, epicData] of Object.entries(epicsMap)) {
+            if (this.selectedSystem !== 'All' && epicData.system !== this.selectedSystem) {
+                delete epicsMap[themeName];
+            } else if (this.selectedVisibility !== 'All' && epicData.visibility !== this.selectedVisibility) {
+                delete epicsMap[themeName];
+            }
+        }
 
         if (this.currentMode === 'kanban') {
             this.renderKanban(container, tasks);
         } else {
-            this.renderAgenda(container, tasks);
+            this.renderAgenda(container, tasks, epicsMap);
         }
     }
 
@@ -1015,25 +1125,8 @@ latest_update: ""
         }
     }
 
-    renderAgenda(container: HTMLElement, tasks: any[]) {
+    renderAgenda(container: HTMLElement, tasks: any[], epicsMap: Record<string, any>) {
         const agendaDiv = container.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 20px; padding-bottom: 20px;' } });
-
-        type EpicData = { path: string, overview: string, schedule: string, file: TFile };
-        const epicsMap: Record<string, EpicData> = {};
-        const epicFilePaths = (this.app.metadataCache as any).getCachedFiles().filter((p: string) => p.endsWith(EPIC_MARKER_FILE));
-        for (const epicFilePath of epicFilePaths) {
-            const epicFile = this.app.vault.getAbstractFileByPath(epicFilePath);
-            if (epicFile instanceof TFile && epicFile.parent) {
-                const cache = this.app.metadataCache.getFileCache(epicFile);
-                const fm = cache?.frontmatter || {};
-                epicsMap[epicFile.parent.name] = {
-                    path: epicFile.parent.path,
-                    overview: fm['overview'] || '',
-                    schedule: fm['schedule'] || '',
-                    file: epicFile
-                };
-            }
-        }
 
         // Group tasks by their theme
         const grouped: Record<string, typeof tasks> = {};
@@ -1055,72 +1148,83 @@ latest_update: ""
             }
         }
 
-        const themes = Object.keys(grouped).sort();
+        const allThemes = Object.keys(grouped).sort();
 
-        for (const theme of themes) {
-            const themeDetails = agendaDiv.createEl('details', { attr: { style: 'background: var(--background-secondary); border-radius: 8px; padding: 15px;', open: 'true' } });
+        const renderCategorySection = (categoryTitle: string, filterCategory: string) => {
+            const categoryThemes = allThemes.filter(theme => {
+                const epic = epicsMap[theme];
+                const cat = epic ? epic.category : 'その他';
+                return filterCategory === 'all' || cat === filterCategory;
+            });
 
-            // Override toggle arrow style slightly and provide flex layout for summary
-            const themeSummary = themeDetails.createEl('summary', { attr: { style: 'display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 10px; margin-bottom: 10px; cursor: pointer; user-select: none;' } });
+            if (categoryThemes.length === 0) return;
 
-            const summaryLeft = themeSummary.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 5px; flex-grow: 1;' } });
-            const titleRow = summaryLeft.createDiv({ attr: { style: 'display: flex; align-items: center; gap: 10px;' } });
-            titleRow.createEl('h3', { text: `📁 ${theme}`, attr: { style: 'margin: 0; display: inline-block;' } });
+            const sectionDiv = agendaDiv.createDiv({ attr: { style: 'margin-bottom: 30px;' } });
+            sectionDiv.createEl('h2', { text: categoryTitle, attr: { style: 'border-bottom: 2px solid var(--background-modifier-border); padding-bottom: 5px; margin-bottom: 15px;' } });
 
-            const epicData = epicsMap[theme];
-            const overviewText = epicData ? epicData.overview : '';
-            const scheduleText = epicData ? epicData.schedule : '';
+            for (const theme of categoryThemes) {
+                const themeDetails = sectionDiv.createEl('details', { attr: { style: 'background: var(--background-secondary); border-radius: 8px; padding: 15px; margin-bottom: 15px;', open: 'true' } });
 
-            if (overviewText || scheduleText) {
-                const metaRow = summaryLeft.createDiv({ attr: { style: 'font-size: 0.85em; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px; margin-top: 6px; white-space: pre-wrap; line-height: 1.4;' } });
-                if (overviewText) {
-                    const row = metaRow.createDiv();
-                    row.innerHTML = `概況: ${overviewText}`;
+                const themeSummary = themeDetails.createEl('summary', { attr: { style: 'display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 10px; margin-bottom: 10px; cursor: pointer; user-select: none;' } });
+
+                const summaryLeft = themeSummary.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 5px; flex-grow: 1;' } });
+                const titleRow = summaryLeft.createDiv({ attr: { style: 'display: flex; align-items: center; gap: 10px;' } });
+                titleRow.createEl('h3', { text: `📁 ${theme}`, attr: { style: 'margin: 0; display: inline-block;' } });
+
+                const epicData = epicsMap[theme];
+                const overviewText = epicData ? epicData.overview : '';
+                const scheduleText = epicData ? epicData.schedule : '';
+
+                if (overviewText || scheduleText) {
+                    const metaRow = summaryLeft.createDiv({ attr: { style: 'font-size: 0.85em; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px; margin-top: 6px; white-space: pre-wrap; line-height: 1.4;' } });
+                    if (overviewText) {
+                        const row = metaRow.createDiv();
+                        row.innerHTML = `概況: ${overviewText}`;
+                    }
+                    if (scheduleText) {
+                        const row = metaRow.createDiv();
+                        row.innerHTML = `スケジュール: ${scheduleText}`;
+                    }
                 }
-                if (scheduleText) {
-                    const row = metaRow.createDiv();
-                    row.innerHTML = `スケジュール: ${scheduleText}`;
+
+                const summaryRight = themeSummary.createDiv({ attr: { style: 'display: flex; gap: 10px; align-items: center;' } });
+
+                if (epicData) {
+                    const editEpicBtn = summaryRight.createEl('button', { text: '📝 Epic情報編集', attr: { style: 'font-size: 0.8em; padding: 4px 10px; height: auto; background-color: transparent; border: 1px solid var(--background-modifier-border); box-shadow: none;' } });
+                    editEpicBtn.onclick = (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        new EpicEditModal(this.app, overviewText, scheduleText, async (newOverview, newSchedule) => {
+                            await this.app.fileManager.processFrontMatter(epicData.file, (fm) => {
+                                fm['overview'] = newOverview;
+                                fm['schedule'] = newSchedule;
+                            });
+                            new Notice(`Epic情報を更新しました`);
+                            this.renderBoard();
+                        }).open();
+                    };
                 }
-            }
 
-            const summaryRight = themeSummary.createDiv({ attr: { style: 'display: flex; gap: 10px; align-items: center;' } });
+                const themeTasks = grouped[theme];
 
-            if (epicData) {
-                const editEpicBtn = summaryRight.createEl('button', { text: '📝 Epic情報編集', attr: { style: 'font-size: 0.8em; padding: 4px 10px; height: auto; background-color: transparent; border: 1px solid var(--background-modifier-border); box-shadow: none;' } });
-                editEpicBtn.onclick = (e) => {
+                let parentPath = epicPaths[theme] || '/';
+                if (parentPath === '/' && themeTasks && themeTasks.length > 0) {
+                    const validTask = themeTasks.find(t => t.epicPath && t.epicPath !== '/');
+                    parentPath = validTask ? validTask.epicPath : (themeTasks[0].epicPath || '/');
+                }
+
+                const addTaskBtn = summaryRight.createEl('button', { text: '＋ タスク追加', attr: { style: 'font-size: 0.8em; padding: 4px 10px; height: auto; background-color: transparent; border: 1px solid var(--background-modifier-border); box-shadow: none;' } });
+                addTaskBtn.onclick = (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    new EpicEditModal(this.app, overviewText, scheduleText, async (newOverview, newSchedule) => {
-                        await this.app.fileManager.processFrontMatter(epicData.file, (fm) => {
-                            fm['overview'] = newOverview;
-                            fm['schedule'] = newSchedule;
-                        });
-                        new Notice(`Epic情報を更新しました`);
-                        this.renderBoard();
-                    }).open();
-                };
-            }
-
-            const themeTasks = grouped[theme];
-
-            let parentPath = epicPaths[theme] || '/';
-            if (parentPath === '/' && themeTasks && themeTasks.length > 0) {
-                const validTask = themeTasks.find(t => t.epicPath && t.epicPath !== '/');
-                parentPath = validTask ? validTask.epicPath : (themeTasks[0].epicPath || '/');
-            }
-
-            const addTaskBtn = summaryRight.createEl('button', { text: '＋ タスク追加', attr: { style: 'font-size: 0.8em; padding: 4px 10px; height: auto; background-color: transparent; border: 1px solid var(--background-modifier-border); box-shadow: none;' } });
-            addTaskBtn.onclick = (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                new TaskCreateModal(this.app, parentPath, async (taskName: string) => {
-                    const taskFolderPath = parentPath === '/' ? normalizePath(taskName) : normalizePath(`${parentPath}/${taskName}`);
-                    try {
-                        await this.app.vault.createFolder(taskFolderPath);
-                        const taskFilePath = normalizePath(`${taskFolderPath}/${TASK_MARKER_FILE}`);
-                        const now = new Date().toISOString();
-                        const defaultStatus = this.plugin.settings.defaultStatus || '未着手';
-                        const content = `---
+                    new TaskCreateModal(this.app, parentPath, async (taskName: string) => {
+                        const taskFolderPath = parentPath === '/' ? normalizePath(taskName) : normalizePath(`${parentPath}/${taskName}`);
+                        try {
+                            await this.app.vault.createFolder(taskFolderPath);
+                            const taskFilePath = normalizePath(`${taskFolderPath}/${TASK_MARKER_FILE}`);
+                            const now = new Date().toISOString();
+                            const defaultStatus = this.plugin.settings.defaultStatus || '未着手';
+                            const content = `---
 title: "${taskName}"
 status: "${defaultStatus}"
 assignee: "未設定"
@@ -1128,25 +1232,39 @@ created_at: "${now}"
 latest_update: ""
 ---
 `;
-                        await this.app.vault.create(taskFilePath, content);
-                        new Notice(`タスク「${taskName}」を作成しました`);
-                        this.renderBoard();
-                    } catch (e: any) {
-                        console.error(e);
-                        new Notice(`作成失敗: 同名のフォルダが既に存在する可能性があります`);
+                            await this.app.vault.create(taskFilePath, content);
+                            new Notice(`タスク「${taskName}」を作成しました`);
+                            this.renderBoard();
+                        } catch (e: any) {
+                            console.error(e);
+                            new Notice(`作成失敗: 同名のフォルダが既に存在する可能性があります`);
+                        }
+                    }).open();
+                };
+
+                const tasksDiv = themeDetails.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 10px; margin-top: 10px;' } });
+
+                if (themeTasks) {
+                    themeTasks.sort((a, b) => b.mtime - a.mtime);
+
+                    for (const task of themeTasks) {
+                        this.renderTaskCard(tasksDiv, task, 'agenda');
                     }
-                }).open();
-            };
-
-            const tasksDiv = themeDetails.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 10px; margin-top: 10px;' } });
-
-            if (themeTasks) {
-                themeTasks.sort((a, b) => b.mtime - a.mtime);
-
-                for (const task of themeTasks) {
-                    this.renderTaskCard(tasksDiv, task, 'agenda');
                 }
             }
+        };
+
+        renderCategorySection('🛠 維持管理', '維持管理');
+        renderCategorySection('🚀 個別テーマ', '個別テーマ');
+
+        // Ensure themes that don't match exactly those two still get rendered
+        const otherThemes = allThemes.filter(theme => {
+            const epic = epicsMap[theme];
+            const cat = epic ? epic.category : 'その他';
+            return cat !== '維持管理' && cat !== '個別テーマ';
+        });
+        if (otherThemes.length > 0) {
+            renderCategorySection('📦 その他', 'その他');
         }
     }
 
