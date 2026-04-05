@@ -135,6 +135,72 @@ export class FileNameInputModal extends Modal {
     }
 }
 
+export class LatestUpdateModal extends Modal {
+    onSubmit: (result: string) => void;
+    initialText: string;
+
+    constructor(app: App, initialText: string, onSubmit: (result: string) => void) {
+        super(app);
+        this.initialText = initialText;
+        this.onSubmit = onSubmit;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('h2', { text: '最新状況の編集' });
+
+        const toolbar = contentEl.createDiv({ attr: { style: 'display: flex; gap: 8px; margin-bottom: 8px;' } });
+
+        const textArea = contentEl.createEl('textarea', { attr: { style: 'width: 100%; height: 150px; margin-bottom: 15px; font-family: inherit; padding: 8px;' } });
+        textArea.value = this.initialText;
+
+        const wrapText = (color: string) => {
+            const start = textArea.selectionStart;
+            const end = textArea.selectionEnd;
+            const text = textArea.value;
+            const selectedText = text.substring(start, end);
+            if (!selectedText) {
+                new Notice('テキストを選択してください');
+                return;
+            }
+            const before = text.substring(0, start);
+            const after = text.substring(end);
+            textArea.value = `${before}<span style="color: ${color};">${selectedText}</span>${after}`;
+            textArea.focus();
+            textArea.setSelectionRange(start, start + selectedText.length + 23 + color.length + 9);
+        };
+
+        const redBtn = toolbar.createEl('button', { text: '🔴 赤字', attr: { style: 'font-size: 0.8em; padding: 4px 8px; height: auto;' } });
+        redBtn.onclick = () => wrapText('red');
+
+        const blueBtn = toolbar.createEl('button', { text: '🔵 青字', attr: { style: 'font-size: 0.8em; padding: 4px 8px; height: auto;' } });
+        blueBtn.onclick = () => wrapText('blue');
+
+        new Setting(contentEl)
+            .addButton((btn) =>
+                btn
+                    .setButtonText('保存する')
+                    .setCta()
+                    .onClick(() => {
+                        this.close();
+                        this.onSubmit(textArea.value);
+                    })
+            )
+            .addButton((btn) =>
+                btn
+                    .setButtonText('キャンセル')
+                    .onClick(() => {
+                        this.close();
+                    })
+            );
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
+}
+
 interface FileItem { file: TFile, mtime: number, assignee: string }
 
 export class FolderDashView extends ItemView {
@@ -698,8 +764,26 @@ export class FolderDashBacklogView extends ItemView {
 
         topRow.createSpan({ text: `👤 担当: ${task.assignee}`, attr: { style: 'font-size: 0.8em; color: var(--text-muted); margin-left: 10px;' } });
 
-        if (viewMode === 'agenda' && task.latestUpdate) {
-            mainContent.createDiv({ text: `� ${task.latestUpdate}`, attr: { style: 'font-size: 0.85em; color: var(--text-normal); margin-top: 4px; padding-left: 5px; border-left: 2px solid var(--interactive-accent);' } });
+        if (viewMode === 'agenda') {
+            const updateArea = mainContent.createDiv({ attr: { style: 'font-size: 0.85em; color: var(--text-normal); margin-top: 4px; padding-left: 5px; border-left: 2px solid var(--interactive-accent); display: flex; flex-direction: column; gap: 6px;' } });
+
+            const contentDiv = updateArea.createDiv({ attr: { style: 'white-space: pre-wrap; line-height: 1.4;' } });
+            if (task.latestUpdate) {
+                // innerHTML renders formatting tags securely in this local app context
+                contentDiv.innerHTML = `💬 ${task.latestUpdate}`;
+            } else {
+                contentDiv.innerHTML = `💬 <span style="color: var(--text-muted); font-style: italic;">(最新状況が未入力です)</span>`;
+            }
+
+            const editBtn = updateArea.createEl('button', { text: '📝 編集', attr: { style: 'align-self: flex-start; font-size: 0.75em; padding: 2px 8px; height: auto; background-color: transparent; border: 1px solid var(--background-modifier-border); box-shadow: none;' } });
+            editBtn.onclick = () => {
+                new LatestUpdateModal(this.app, task.latestUpdate || '', async (newText) => {
+                    await this.app.fileManager.processFrontMatter(task.file, (fm) => {
+                        fm['latest_update'] = newText;
+                    });
+                    this.renderBoard();
+                }).open();
+            };
         }
 
         const actionsDiv = card.createDiv({ attr: { style: 'display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: flex-end; min-width: max-content;' } });
