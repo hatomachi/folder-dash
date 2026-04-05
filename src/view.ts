@@ -738,6 +738,8 @@ export async function updateSummaryStatus(
 export class FolderDashBacklogView extends ItemView {
     plugin: FolderDashPlugin;
     currentMode: 'kanban' | 'agenda' = 'kanban';
+    selectedAssignee: string = 'All';
+    doTodayFilterEnabled: boolean = false;
 
     constructor(leaf: WorkspaceLeaf, plugin: FolderDashPlugin) {
         super(leaf);
@@ -785,12 +787,76 @@ export class FolderDashBacklogView extends ItemView {
         container.empty();
         container.classList.add('folder-dash-board-view');
 
-        const headerContainer = container.createDiv({ attr: { style: 'margin-bottom: 20px; padding-top: 10px; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center;' } });
+        const summaryPaths = (this.app.metadataCache as any).getCachedFiles().filter((path: string) => path.endsWith(TASK_MARKER_FILE));
+
+        type TaskData = { file: TFile, name: string, status: string, assignee: string, mtime: number, theme: string, epicPath: string, latestUpdate: string, do_today: boolean };
+        const allTasks: TaskData[] = [];
+        const uniqueAssignees = new Set<string>();
+
+        for (const path of summaryPaths) {
+            const abstractFile = this.app.vault.getAbstractFileByPath(path);
+            if (abstractFile instanceof TFile) {
+                const cache = this.app.metadataCache.getFileCache(abstractFile);
+                if (cache) {
+                    const fm = cache.frontmatter || {};
+                    const title = fm['title'] || abstractFile.parent?.name || '無題のタスク';
+                    const status = fm['status'] || 'not-started';
+                    const assignee = fm['assignee'] || '未設定';
+                    uniqueAssignees.add(assignee);
+                    const do_today = fm['do_today'] === true;
+
+                    const epicInfo = this.getEpicInfoForTask(abstractFile);
+                    let theme = fm['theme'] || fm['epic'];
+                    let epicPath = '/';
+                    if (!theme) {
+                        theme = epicInfo ? epicInfo.name : (abstractFile.parent?.parent?.name || '未分類');
+                        epicPath = epicInfo ? epicInfo.path : (abstractFile.parent?.parent?.path || '/');
+                    } else {
+                        epicPath = epicInfo ? epicInfo.path : (abstractFile.parent?.parent?.path || '/');
+                    }
+
+                    const latestUpdate = fm['latest_update'] || '';
+                    allTasks.push({ file: abstractFile, name: title, status, assignee, mtime: abstractFile.stat.mtime, theme, epicPath, latestUpdate, do_today });
+                }
+            }
+        }
+
+        const assigneesArray = Array.from(uniqueAssignees).sort();
+
+        const headerContainer = container.createDiv({ attr: { style: 'margin-bottom: 20px; padding-top: 10px; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;' } });
         headerContainer.createEl('h2', { text: 'バックログボード', attr: { style: 'margin: 0;' } });
 
-        const controlsContainer = headerContainer.createDiv({ attr: { style: 'display: flex; gap: 15px; align-items: center;' } });
+        const controlsContainer = headerContainer.createDiv({ attr: { style: 'display: flex; gap: 15px; align-items: center; flex-wrap: wrap;' } });
 
-        const newEpicBtn = controlsContainer.createEl('button', { text: '＋ 新規エピック作成', cls: 'mod-cta', attr: { style: 'padding: 4px 12px; height: auto;' } });
+        const assigneeSelect = controlsContainer.createEl('select', { attr: { style: 'padding: 4px 8px; border-radius: 4px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); color: var(--text-normal);' } });
+        assigneeSelect.createEl('option', { value: 'All', text: '👤 全員 (All)' });
+        for (const assignee of assigneesArray) {
+            const opt = assigneeSelect.createEl('option', { value: assignee, text: assignee });
+            if (this.selectedAssignee === assignee) opt.selected = true;
+        }
+        assigneeSelect.onchange = () => {
+            this.selectedAssignee = assigneeSelect.value;
+            this.renderBoard();
+        };
+
+        const doTodayBtn = controlsContainer.createEl('button', { text: '🌟 今日やる', attr: { style: this.doTodayFilterEnabled ? 'background-color: var(--color-yellow, #e6b12a); color: #fff; font-weight: bold; border: none;' : 'background-color: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted);' } });
+        doTodayBtn.onclick = () => {
+            this.doTodayFilterEnabled = !this.doTodayFilterEnabled;
+            this.renderBoard();
+        };
+
+        const toggleGroup = controlsContainer.createDiv({ attr: { style: 'display: flex; gap: 5px; background: var(--background-secondary); padding: 4px; border-radius: 6px;' } });
+
+        const activeStyle = 'background-color: var(--interactive-accent); color: var(--text-on-accent); padding: 4px 12px; border-radius: 4px; border: none; cursor: pointer; font-size: 0.9em;';
+        const inactiveStyle = 'background-color: transparent; color: var(--text-muted); padding: 4px 12px; border-radius: 4px; border: none; cursor: pointer; font-size: 0.9em;';
+
+        const kanbanBtn = toggleGroup.createEl('button', { text: 'Kanban', attr: { style: this.currentMode === 'kanban' ? activeStyle : inactiveStyle } });
+        const agendaBtn = toggleGroup.createEl('button', { text: 'Agenda', attr: { style: this.currentMode === 'agenda' ? activeStyle : inactiveStyle } });
+
+        kanbanBtn.onclick = () => { this.currentMode = 'kanban'; this.renderBoard(); };
+        agendaBtn.onclick = () => { this.currentMode = 'agenda'; this.renderBoard(); };
+
+        const newEpicBtn = controlsContainer.createEl('button', { text: '＋ 新規エピック', cls: 'mod-cta', attr: { style: 'padding: 4px 12px; height: auto;' } });
         newEpicBtn.onclick = () => {
             new EpicCreateModal(this.app, async (name, basePath) => {
                 const folderPath = basePath === '/' ? normalizePath(name) : normalizePath(`${basePath}/${name}`);
@@ -815,47 +881,11 @@ latest_update: ""
             }).open();
         };
 
-        const toggleGroup = controlsContainer.createDiv({ attr: { style: 'display: flex; gap: 5px; background: var(--background-secondary); padding: 4px; border-radius: 6px;' } });
-
-        const activeStyle = 'background-color: var(--interactive-accent); color: var(--text-on-accent); padding: 4px 12px; border-radius: 4px; border: none; cursor: pointer; font-size: 0.9em;';
-        const inactiveStyle = 'background-color: transparent; color: var(--text-muted); padding: 4px 12px; border-radius: 4px; border: none; cursor: pointer; font-size: 0.9em;';
-
-        const kanbanBtn = toggleGroup.createEl('button', { text: 'Kanban', attr: { style: this.currentMode === 'kanban' ? activeStyle : inactiveStyle } });
-        const agendaBtn = toggleGroup.createEl('button', { text: 'Agenda', attr: { style: this.currentMode === 'agenda' ? activeStyle : inactiveStyle } });
-
-        kanbanBtn.onclick = () => { this.currentMode = 'kanban'; this.renderBoard(); };
-        agendaBtn.onclick = () => { this.currentMode = 'agenda'; this.renderBoard(); };
-
-        const summaryPaths = (this.app.metadataCache as any).getCachedFiles().filter((path: string) => path.endsWith(TASK_MARKER_FILE));
-
-        type TaskData = { file: TFile, name: string, status: string, assignee: string, mtime: number, theme: string, epicPath: string, latestUpdate: string };
-        const tasks: TaskData[] = [];
-
-        for (const path of summaryPaths) {
-            const abstractFile = this.app.vault.getAbstractFileByPath(path);
-            if (abstractFile instanceof TFile) {
-                const cache = this.app.metadataCache.getFileCache(abstractFile);
-                if (cache) {
-                    const fm = cache.frontmatter || {};
-                    const title = fm['title'] || abstractFile.parent?.name || '無題のタスク';
-                    const status = fm['status'] || 'not-started';
-                    const assignee = fm['assignee'] || '未設定';
-
-                    const epicInfo = this.getEpicInfoForTask(abstractFile);
-                    let theme = fm['theme'] || fm['epic'];
-                    let epicPath = '/';
-                    if (!theme) {
-                        theme = epicInfo ? epicInfo.name : (abstractFile.parent?.parent?.name || '未分類');
-                        epicPath = epicInfo ? epicInfo.path : (abstractFile.parent?.parent?.path || '/');
-                    } else {
-                        epicPath = epicInfo ? epicInfo.path : (abstractFile.parent?.parent?.path || '/');
-                    }
-
-                    const latestUpdate = fm['latest_update'] || '';
-                    tasks.push({ file: abstractFile, name: title, status, assignee, mtime: abstractFile.stat.mtime, theme, epicPath, latestUpdate });
-                }
-            }
-        }
+        const tasks = allTasks.filter(task => {
+            if (this.selectedAssignee !== 'All' && task.assignee !== this.selectedAssignee) return false;
+            if (this.doTodayFilterEnabled && !task.do_today) return false;
+            return true;
+        });
 
         if (this.currentMode === 'kanban') {
             this.renderKanban(container, tasks);
@@ -977,15 +1007,27 @@ latest_update: ""
     }
 
     renderTaskCard(parentDiv: HTMLElement, task: any, viewMode: 'kanban' | 'agenda') {
-        const cardStyle = viewMode === 'kanban'
+        let cardStyle = viewMode === 'kanban'
             ? 'background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);'
             : 'background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 12px; display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);';
+
+        if (task.do_today) {
+            cardStyle += ' border-color: var(--color-yellow, #e6b12a); box-shadow: 0 0 5px rgba(230, 177, 42, 0.4);';
+        }
 
         const card = parentDiv.createDiv({ attr: { style: cardStyle } });
 
         const mainContent = card.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 4px; flex-grow: 1;' } });
 
         const topRow = mainContent.createDiv({ attr: { style: 'display: flex; align-items: center; gap: 10px; flex-wrap: wrap;' } });
+
+        const starBtn = topRow.createEl('button', { text: '🌟', attr: { style: task.do_today ? 'padding: 2px; font-size: 1.2em; background: transparent; border: none; box-shadow: none; cursor: pointer; filter: grayscale(0%); opacity: 1;' : 'padding: 2px; font-size: 1.2em; background: transparent; border: none; box-shadow: none; cursor: pointer; filter: grayscale(100%); opacity: 0.4;' } });
+        starBtn.onclick = async () => {
+            await this.app.fileManager.processFrontMatter(task.file, (fm) => {
+                fm['do_today'] = !fm['do_today'];
+            });
+            this.renderBoard();
+        };
 
         const statusMap: Record<string, string> = {
             'not-started': '⭕️ 未着手',
