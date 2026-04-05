@@ -334,6 +334,62 @@ export class TaskCreateModal extends Modal {
     }
 }
 
+class EpicEditModal extends Modal {
+    onSubmit: (overview: string, schedule: string) => void;
+    initialOverview: string;
+    initialSchedule: string;
+    overviewTextarea: HTMLTextAreaElement;
+    scheduleTextarea: HTMLTextAreaElement;
+
+    constructor(app: App, initialOverview: string, initialSchedule: string, onSubmit: (overview: string, schedule: string) => void) {
+        super(app);
+        this.initialOverview = initialOverview;
+        this.initialSchedule = initialSchedule;
+        this.onSubmit = onSubmit;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.createEl('h2', { text: 'Epic情報の編集', attr: { style: 'margin-bottom: 20px;' } });
+
+        contentEl.createEl('h4', { text: '概況 (overview)', attr: { style: 'margin-bottom: 5px;' } });
+        this.overviewTextarea = contentEl.createEl('textarea', {
+            attr: { style: 'width: 100%; height: 80px; margin-bottom: 15px; resize: vertical;' }
+        });
+        this.overviewTextarea.value = this.initialOverview;
+
+        contentEl.createEl('h4', { text: 'スケジュール (schedule)', attr: { style: 'margin-bottom: 5px;' } });
+        this.scheduleTextarea = contentEl.createEl('textarea', {
+            attr: { style: 'width: 100%; height: 80px; margin-bottom: 15px; resize: vertical;' }
+        });
+        this.scheduleTextarea.value = this.initialSchedule;
+
+        new Setting(contentEl)
+            .addButton((btn) =>
+                btn
+                    .setButtonText('保存')
+                    .setCta()
+                    .onClick(() => {
+                        this.onSubmit(this.overviewTextarea.value, this.scheduleTextarea.value);
+                        this.close();
+                    })
+            )
+            .addButton((btn) =>
+                btn
+                    .setButtonText('キャンセル')
+                    .onClick(() => {
+                        this.close();
+                    })
+            );
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
+}
+
 interface FileItem { file: TFile, mtime: number, assignee: string }
 
 export class FolderDashView extends ItemView {
@@ -923,13 +979,20 @@ latest_update: ""
     renderAgenda(container: HTMLElement, tasks: any[]) {
         const agendaDiv = container.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 20px; padding-bottom: 20px;' } });
 
-        // epicsMap: epicFolderName -> epicFolderPath
-        const epicsMap: Record<string, string> = {};
+        type EpicData = { path: string, overview: string, schedule: string, file: TFile };
+        const epicsMap: Record<string, EpicData> = {};
         const epicFilePaths = (this.app.metadataCache as any).getCachedFiles().filter((p: string) => p.endsWith(EPIC_MARKER_FILE));
         for (const epicFilePath of epicFilePaths) {
             const epicFile = this.app.vault.getAbstractFileByPath(epicFilePath);
             if (epicFile instanceof TFile && epicFile.parent) {
-                epicsMap[epicFile.parent.name] = epicFile.parent.path;
+                const cache = this.app.metadataCache.getFileCache(epicFile);
+                const fm = cache?.frontmatter || {};
+                epicsMap[epicFile.parent.name] = {
+                    path: epicFile.parent.path,
+                    overview: fm['overview'] || '',
+                    schedule: fm['schedule'] || '',
+                    file: epicFile
+                };
             }
         }
 
@@ -944,22 +1007,58 @@ latest_update: ""
         }
 
         // Ensure all Epics (even empty ones) appear
-        for (const [epicName, epicPath] of Object.entries(epicsMap)) {
+        for (const [epicName, epicData] of Object.entries(epicsMap)) {
             if (!grouped[epicName]) {
                 grouped[epicName] = [];
             }
             if (!epicPaths[epicName]) {
-                epicPaths[epicName] = epicPath;
+                epicPaths[epicName] = epicData.path;
             }
         }
 
         const themes = Object.keys(grouped).sort();
 
         for (const theme of themes) {
-            const themeDiv = agendaDiv.createDiv({ attr: { style: 'background: var(--background-secondary); border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 10px;' } });
+            const themeDetails = agendaDiv.createEl('details', { attr: { style: 'background: var(--background-secondary); border-radius: 8px; padding: 15px;', open: 'true' } });
 
-            const themeHeader = themeDiv.createDiv({ attr: { style: 'display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 5px; margin-bottom: 5px;' } });
-            themeHeader.createEl('h3', { text: `📁 ${theme}`, attr: { style: 'margin: 0;' } });
+            // Override toggle arrow style slightly and provide flex layout for summary
+            const themeSummary = themeDetails.createEl('summary', { attr: { style: 'display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 10px; margin-bottom: 10px; cursor: pointer; user-select: none;' } });
+
+            const summaryLeft = themeSummary.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 5px; flex-grow: 1;' } });
+            const titleRow = summaryLeft.createDiv({ attr: { style: 'display: flex; align-items: center; gap: 10px;' } });
+            titleRow.createEl('h3', { text: `📁 ${theme}`, attr: { style: 'margin: 0; display: inline-block;' } });
+
+            const epicData = epicsMap[theme];
+            const overviewText = epicData ? epicData.overview : '';
+            const scheduleText = epicData ? epicData.schedule : '';
+
+            if (overviewText || scheduleText) {
+                const metaRow = summaryLeft.createDiv({ attr: { style: 'font-size: 0.85em; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px; margin-top: 6px; white-space: pre-wrap; line-height: 1.4;' } });
+                if (overviewText) {
+                    metaRow.createDiv({ text: `概況: ${overviewText}` });
+                }
+                if (scheduleText) {
+                    metaRow.createDiv({ text: `スケジュール: ${scheduleText}` });
+                }
+            }
+
+            const summaryRight = themeSummary.createDiv({ attr: { style: 'display: flex; gap: 10px; align-items: center;' } });
+
+            if (epicData) {
+                const editEpicBtn = summaryRight.createEl('button', { text: '📝 Epic情報編集', attr: { style: 'font-size: 0.8em; padding: 4px 10px; height: auto; background-color: transparent; border: 1px solid var(--background-modifier-border); box-shadow: none;' } });
+                editEpicBtn.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    new EpicEditModal(this.app, overviewText, scheduleText, async (newOverview, newSchedule) => {
+                        await this.app.fileManager.processFrontMatter(epicData.file, (fm) => {
+                            fm['overview'] = newOverview;
+                            fm['schedule'] = newSchedule;
+                        });
+                        new Notice(`Epic情報を更新しました`);
+                        this.renderBoard();
+                    }).open();
+                };
+            }
 
             const themeTasks = grouped[theme];
 
@@ -969,8 +1068,10 @@ latest_update: ""
                 parentPath = validTask ? validTask.epicPath : (themeTasks[0].epicPath || '/');
             }
 
-            const addTaskBtn = themeHeader.createEl('button', { text: '＋ タスク追加', attr: { style: 'font-size: 0.8em; padding: 4px 10px; height: auto; background-color: transparent; border: 1px solid var(--background-modifier-border); box-shadow: none;' } });
-            addTaskBtn.onclick = () => {
+            const addTaskBtn = summaryRight.createEl('button', { text: '＋ タスク追加', attr: { style: 'font-size: 0.8em; padding: 4px 10px; height: auto; background-color: transparent; border: 1px solid var(--background-modifier-border); box-shadow: none;' } });
+            addTaskBtn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 new TaskCreateModal(this.app, parentPath, async (taskName: string) => {
                     const taskFolderPath = parentPath === '/' ? normalizePath(taskName) : normalizePath(`${parentPath}/${taskName}`);
                     try {
@@ -996,11 +1097,13 @@ latest_update: ""
                 }).open();
             };
 
+            const tasksDiv = themeDetails.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 10px; margin-top: 10px;' } });
+
             if (themeTasks) {
                 themeTasks.sort((a, b) => b.mtime - a.mtime);
 
                 for (const task of themeTasks) {
-                    this.renderTaskCard(themeDiv, task, 'agenda');
+                    this.renderTaskCard(tasksDiv, task, 'agenda');
                 }
             }
         }
