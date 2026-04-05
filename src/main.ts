@@ -2,7 +2,7 @@ import { App, Notice, Plugin, TFile, TFolder, normalizePath } from 'obsidian';
 import { DEFAULT_SETTINGS, FolderDashSettings, FolderDashSettingTab } from "./settings";
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { VIEW_TYPE_FOLDER_DASH, FolderDashView } from './view';
+import { VIEW_TYPE_FOLDER_DASH, FolderDashView, VIEW_TYPE_BACKLOG_BOARD, FolderDashBacklogView } from './view';
 
 const execPromise = promisify(exec);
 
@@ -26,6 +26,7 @@ export default class FolderDashPlugin extends Plugin {
 		await this.loadSettings();
 
 		this.registerView(VIEW_TYPE_FOLDER_DASH, (leaf) => new FolderDashView(leaf, this));
+		this.registerView(VIEW_TYPE_BACKLOG_BOARD, (leaf) => new FolderDashBacklogView(leaf, this));
 
 		this.addRibbonIcon('folder-sync', 'Folder Dash', (evt: MouseEvent) => {
 			this.activateView();
@@ -35,6 +36,12 @@ export default class FolderDashPlugin extends Plugin {
 			id: 'open-folder-dash-view',
 			name: '左ペインに Folder Dash を開く',
 			callback: () => this.activateView(),
+		});
+
+		this.addCommand({
+			id: 'open-folder-dash-backlog-view',
+			name: 'メインペインにバックログボードを開く',
+			callback: () => this.activateBacklogView(),
 		});
 
 		this.addCommand({
@@ -173,5 +180,17 @@ block_time_minutes: 0
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+	}
+
+	async activateBacklogView() {
+		const { workspace } = this.app;
+		let leaf = workspace.getLeavesOfType(VIEW_TYPE_BACKLOG_BOARD)[0];
+
+		if (!leaf) {
+			leaf = workspace.getLeaf('tab');
+			await leaf.setViewState({ type: VIEW_TYPE_BACKLOG_BOARD, active: true });
+		}
+
+		workspace.revealLeaf(leaf);
 	}
 }

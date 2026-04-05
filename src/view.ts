@@ -2,6 +2,7 @@ import { ItemView, WorkspaceLeaf, TFolder, TFile, Notice, Modal, Setting, App, n
 import FolderDashPlugin from './main';
 
 export const VIEW_TYPE_FOLDER_DASH = 'folder-dash-view';
+export const VIEW_TYPE_BACKLOG_BOARD = 'folder-dash-backlog-view';
 
 export class ReasonInputModal extends Modal {
     onSubmit: (result: string) => void;
@@ -476,6 +477,182 @@ assignee: ${currentUser}${typeProp}
 
                 const li = ul.createEl('li', { attr: { style: 'margin-bottom: 5px;' } });
                 li.innerHTML = `${actionIcon} ${t} - <b>${String(h.action).toUpperCase()}</b>${h.user ? ` <span style="color:var(--text-muted)">by</span> ${h.user}` : ''}${h.reason ? `<br><span style="color:var(--text-muted); padding-left: 15px;">理由: ${h.reason}</span>` : ''}`;
+            }
+        }
+    }
+}
+
+export async function updateSummaryStatus(
+    app: App,
+    plugin: FolderDashPlugin,
+    summaryFile: TFile,
+    newStatus: string,
+    actionName: string,
+    reason?: string
+) {
+    const currentUser = await plugin.getGitUser();
+
+    await app.fileManager.processFrontMatter(summaryFile, (frontmatter) => {
+        const now = new Date();
+        const nowStr = now.toISOString();
+
+        frontmatter['assignee'] = currentUser;
+
+        if (newStatus === 'in-progress' && !frontmatter['started_at']) {
+            frontmatter['started_at'] = nowStr;
+        }
+        if (newStatus === 'completed' && !frontmatter['completed_at']) {
+            frontmatter['completed_at'] = nowStr;
+        }
+
+        const lastToggled = frontmatter['last_toggled_at'];
+        if (lastToggled) {
+            const diffMs = now.getTime() - new Date(lastToggled).getTime();
+            const diffMins = Math.floor(diffMs / 60000);
+
+            if (frontmatter['status'] === 'in-progress') {
+                frontmatter['work_time_minutes'] = (frontmatter['work_time_minutes'] || 0) + diffMins;
+            } else if (frontmatter['status'] === 'blocked') {
+                frontmatter['block_time_minutes'] = (frontmatter['block_time_minutes'] || 0) + diffMins;
+            }
+        }
+
+        frontmatter['status'] = newStatus;
+
+        if (newStatus !== 'completed') {
+            frontmatter['last_toggled_at'] = nowStr;
+        } else {
+            delete frontmatter['last_toggled_at'];
+        }
+
+        let history = frontmatter['history'];
+        if (!Array.isArray(history)) history = [];
+
+        const eventLog: any = { time: nowStr, action: actionName, user: currentUser };
+        if (reason) eventLog.reason = reason;
+
+        history.push(eventLog);
+        frontmatter['history'] = history;
+    });
+}
+
+export class FolderDashBacklogView extends ItemView {
+    plugin: FolderDashPlugin;
+
+    constructor(leaf: WorkspaceLeaf, plugin: FolderDashPlugin) {
+        super(leaf);
+        this.plugin = plugin;
+    }
+
+    getViewType(): string {
+        return VIEW_TYPE_BACKLOG_BOARD;
+    }
+
+    getDisplayText(): string {
+        return 'プロジェクトバックログ';
+    }
+
+    getIcon(): string {
+        return 'kanban-square';
+    }
+
+    async onOpen() {
+        await this.renderBoard();
+
+        this.registerEvent(this.app.metadataCache.on('changed', (file) => {
+            if (file.name === '_Summary.md') {
+                setTimeout(() => this.renderBoard(), 150);
+            }
+        }));
+    }
+
+    async renderBoard() {
+        const container = this.contentEl;
+        container.empty();
+        container.classList.add('folder-dash-board-view');
+
+        container.createEl('h2', {
+            text: 'バックログボード',
+            attr: { style: 'margin-bottom: 20px; padding-top: 10px; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 10px;' }
+        });
+
+        const summaryPaths = (this.app.metadataCache as any).getCachedFiles().filter((path: string) => path.endsWith('_Summary.md'));
+
+        type TaskData = { file: TFile, name: string, status: string, assignee: string, mtime: number };
+        const tasks: TaskData[] = [];
+
+        for (const path of summaryPaths) {
+            const abstractFile = this.app.vault.getAbstractFileByPath(path);
+            if (abstractFile instanceof TFile) {
+                const cache = this.app.metadataCache.getFileCache(abstractFile);
+                if (cache) {
+                    const fm = cache.frontmatter || {};
+                    const title = fm['title'] || abstractFile.parent?.name || '無題のタスク';
+                    const status = fm['status'] || 'not-started';
+                    const assignee = fm['assignee'] || '未設定';
+                    tasks.push({ file: abstractFile, name: title, status, assignee, mtime: abstractFile.stat.mtime });
+                }
+            }
+        }
+
+        const columns = [
+            { id: 'not-started', label: '未着手 (Not Started)' },
+            { id: 'in-progress', label: '進行中 (In Progress)' },
+            { id: 'blocked', label: 'ブロック (Blocked)' },
+            { id: 'completed', label: '完了 (Completed)' }
+        ];
+
+        const boardDiv = container.createDiv({ attr: { style: 'display: flex; gap: 15px; overflow-x: auto; padding-bottom: 20px; min-height: 400px; align-items: flex-start;' } });
+
+        for (const col of columns) {
+            const colItems = tasks.filter(t => t.status === col.id);
+            colItems.sort((a, b) => b.mtime - a.mtime);
+
+            const colDiv = boardDiv.createDiv({ attr: { style: 'flex: 1; min-width: 250px; background: var(--background-secondary); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 10px;' } });
+
+            const header = colDiv.createDiv({ attr: { style: 'font-weight: bold; padding-bottom: 8px; border-bottom: 1px solid var(--background-modifier-border); margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center;' } });
+            header.createSpan({ text: col.label });
+            header.createSpan({ text: String(colItems.length), attr: { style: 'background: var(--background-modifier-border); padding: 2px 8px; border-radius: 12px; font-size: 0.8em; color: var(--text-muted);' } });
+
+            for (const task of colItems) {
+                const card = colDiv.createDiv({ attr: { style: 'background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);' } });
+
+                const titleLink = card.createEl('a', { text: task.name, cls: 'internal-link', attr: { style: 'font-weight: bold; cursor: pointer; text-decoration: none; display: block; margin-bottom: 4px;' } });
+                titleLink.onclick = (e) => {
+                    e.preventDefault();
+                    this.app.workspace.getLeaf(false).openFile(task.file);
+                };
+
+                card.createDiv({ text: `👤 担当: ${task.assignee}`, attr: { style: 'font-size: 0.8em; color: var(--text-muted);' } });
+
+                const actionsDiv = card.createDiv({ attr: { style: 'display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px;' } });
+
+                const createQuickBtn = (label: string, newStatus: string, actionName: string, btnStyle: string = '') => {
+                    const btn = actionsDiv.createEl('button', { text: label, attr: { style: `font-size: 0.75em; padding: 4px 8px; height: auto; ${btnStyle}` } });
+                    btn.onclick = async () => {
+                        await updateSummaryStatus(this.app, this.plugin, task.file, newStatus, actionName);
+                        this.renderBoard();
+                    };
+                    return btn;
+                };
+
+                if (task.status === 'not-started') {
+                    createQuickBtn('▶ 着手', 'in-progress', 'start', 'background-color: var(--interactive-accent); color: var(--text-on-accent);');
+                } else if (task.status === 'in-progress') {
+                    const blockBtn = actionsDiv.createEl('button', { text: '⏸ ブロック', attr: { style: 'font-size: 0.75em; padding: 4px 8px; height: auto;' } });
+                    blockBtn.onclick = async () => {
+                        new ReasonInputModal(this.app, this.plugin.settings.blockReasons || [], async (reason) => {
+                            await updateSummaryStatus(this.app, this.plugin, task.file, 'blocked', 'block', reason || '理由なし');
+                            this.renderBoard();
+                        }).open();
+                    };
+                    createQuickBtn('✅ 完了', 'completed', 'complete');
+                } else if (task.status === 'blocked') {
+                    createQuickBtn('▶ 再開', 'in-progress', 'start', 'background-color: var(--interactive-accent); color: var(--text-on-accent);');
+                    createQuickBtn('✅ 完了', 'completed', 'complete');
+                } else if (task.status === 'completed') {
+                    createQuickBtn('↩︎ 再開', 'in-progress', 'start');
+                }
             }
         }
     }
