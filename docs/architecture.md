@@ -21,6 +21,7 @@
 ```yaml
 title: string                # タスク名
 assignee: string             # 現在の主担当者（自動取得されたGit名）。アクションを起こしたユーザー名でテイクオーバー（上書き更新）される。
+do_today: boolean            # 「今日やる」タスクかどうかのフラグ（「🌟」ボタン押下時にトグル更新され、フィルターとして利用される）
 status: string               # 現在の状態（'not-started', 'in-progress', 'blocked', 'completed'）
 created_at: string           # タスクノート生成時のISO日時文字列
 started_at: string           # 最初に「着手」ボタンが押されたISO日時文字列
