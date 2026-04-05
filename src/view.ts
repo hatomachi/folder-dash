@@ -817,7 +817,7 @@ export async function updateSummaryStatus(
 
 export class FolderDashBacklogView extends ItemView {
     plugin: FolderDashPlugin;
-    currentMode: 'kanban' | 'agenda' = 'kanban';
+    currentMode: 'kanban' | 'agenda' = 'agenda';
     selectedAssignee: string = 'All';
     doTodayFilterEnabled: boolean = false;
 
