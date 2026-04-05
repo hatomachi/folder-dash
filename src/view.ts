@@ -276,6 +276,64 @@ export class EpicCreateModal extends Modal {
     }
 }
 
+export class TaskCreateModal extends Modal {
+    onSubmit: (name: string) => void;
+    taskName: string = '';
+    parentPath: string;
+
+    constructor(app: App, parentPath: string, onSubmit: (name: string) => void) {
+        super(app);
+        this.parentPath = parentPath;
+        this.onSubmit = onSubmit;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('h2', { text: '新規タスクの作成' });
+        contentEl.createEl('p', { text: `作成先: ${this.parentPath}`, attr: { style: 'color: var(--text-muted); font-size: 0.85em; margin-top: -10px; margin-bottom: 20px;' } });
+
+        new Setting(contentEl)
+            .setName('タスク名 (フォルダ名)')
+            .addText((text) =>
+                text.onChange((value) => {
+                    this.taskName = value;
+                }).inputEl.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        this.submit();
+                    }
+                })
+            );
+
+        new Setting(contentEl)
+            .addButton((btn) =>
+                btn
+                    .setButtonText('作成')
+                    .setCta()
+                    .onClick(() => this.submit())
+            )
+            .addButton((btn) =>
+                btn
+                    .setButtonText('キャンセル')
+                    .onClick(() => {
+                        this.close();
+                    })
+            );
+    }
+
+    submit() {
+        let name = this.taskName.trim();
+        if (!name) name = '無題のタスク';
+        this.close();
+        this.onSubmit(name);
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
+}
+
 interface FileItem { file: TFile, mtime: number, assignee: string }
 
 export class FolderDashView extends ItemView {
@@ -698,18 +756,18 @@ export class FolderDashBacklogView extends ItemView {
         return 'kanban-square';
     }
 
-    getEpicForTask(taskFile: TFile): string {
+    getEpicInfoForTask(taskFile: TFile): { name: string, path: string } | null {
         let currentFolder = taskFile.parent;
         while (currentFolder) {
             const prefix = currentFolder.path === '/' ? '' : currentFolder.path;
             const epicPath = normalizePath(`${prefix}/${EPIC_MARKER_FILE}`);
             const epicFile = this.app.vault.getAbstractFileByPath(epicPath);
             if (epicFile instanceof TFile) {
-                return currentFolder.name;
+                return { name: currentFolder.name, path: currentFolder.path };
             }
             currentFolder = currentFolder.parent;
         }
-        return '';
+        return null;
     }
 
     async onOpen() {
@@ -770,7 +828,7 @@ latest_update: ""
 
         const summaryPaths = (this.app.metadataCache as any).getCachedFiles().filter((path: string) => path.endsWith(TASK_MARKER_FILE));
 
-        type TaskData = { file: TFile, name: string, status: string, assignee: string, mtime: number, theme: string, latestUpdate: string };
+        type TaskData = { file: TFile, name: string, status: string, assignee: string, mtime: number, theme: string, epicPath: string, latestUpdate: string };
         const tasks: TaskData[] = [];
 
         for (const path of summaryPaths) {
@@ -782,12 +840,19 @@ latest_update: ""
                     const title = fm['title'] || abstractFile.parent?.name || '無題のタスク';
                     const status = fm['status'] || 'not-started';
                     const assignee = fm['assignee'] || '未設定';
+
+                    const epicInfo = this.getEpicInfoForTask(abstractFile);
                     let theme = fm['theme'] || fm['epic'];
+                    let epicPath = '/';
                     if (!theme) {
-                        theme = this.getEpicForTask(abstractFile) || abstractFile.parent?.parent?.name || '未分類';
+                        theme = epicInfo ? epicInfo.name : (abstractFile.parent?.parent?.name || '未分類');
+                        epicPath = epicInfo ? epicInfo.path : (abstractFile.parent?.parent?.path || '/');
+                    } else {
+                        epicPath = epicInfo ? epicInfo.path : (abstractFile.parent?.parent?.path || '/');
                     }
+
                     const latestUpdate = fm['latest_update'] || '';
-                    tasks.push({ file: abstractFile, name: title, status, assignee, mtime: abstractFile.stat.mtime, theme, latestUpdate });
+                    tasks.push({ file: abstractFile, name: title, status, assignee, mtime: abstractFile.stat.mtime, theme, epicPath, latestUpdate });
                 }
             }
         }
@@ -839,9 +904,45 @@ latest_update: ""
 
         for (const theme of themes) {
             const themeDiv = agendaDiv.createDiv({ attr: { style: 'background: var(--background-secondary); border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 10px;' } });
-            themeDiv.createEl('h3', { text: `📁 ${theme}`, attr: { style: 'margin: 0 0 10px 0; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 5px;' } });
+
+            const themeHeader = themeDiv.createDiv({ attr: { style: 'display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 5px; margin-bottom: 5px;' } });
+            themeHeader.createEl('h3', { text: `📁 ${theme}`, attr: { style: 'margin: 0;' } });
 
             const themeTasks = grouped[theme];
+
+            let parentPath = '/';
+            if (themeTasks && themeTasks.length > 0) {
+                const validTask = themeTasks.find(t => t.epicPath && t.epicPath !== '/');
+                parentPath = validTask ? validTask.epicPath : (themeTasks[0].epicPath || '/');
+            }
+
+            const addTaskBtn = themeHeader.createEl('button', { text: '＋ タスク追加', attr: { style: 'font-size: 0.8em; padding: 4px 10px; height: auto; background-color: transparent; border: 1px solid var(--background-modifier-border); box-shadow: none;' } });
+            addTaskBtn.onclick = () => {
+                new TaskCreateModal(this.app, parentPath, async (taskName: string) => {
+                    const taskFolderPath = parentPath === '/' ? normalizePath(taskName) : normalizePath(`${parentPath}/${taskName}`);
+                    try {
+                        await this.app.vault.createFolder(taskFolderPath);
+                        const taskFilePath = normalizePath(`${taskFolderPath}/${TASK_MARKER_FILE}`);
+                        const now = new Date().toISOString();
+                        const defaultStatus = this.plugin.settings.defaultStatus || '未着手';
+                        const content = `---
+title: "${taskName}"
+status: "${defaultStatus}"
+assignee: "未設定"
+created_at: "${now}"
+latest_update: ""
+---
+`;
+                        await this.app.vault.create(taskFilePath, content);
+                        new Notice(`タスク「${taskName}」を作成しました`);
+                        this.renderBoard();
+                    } catch (e: any) {
+                        console.error(e);
+                        new Notice(`作成失敗: 同名のフォルダが既に存在する可能性があります`);
+                    }
+                }).open();
+            };
+
             if (themeTasks) {
                 themeTasks.sort((a, b) => b.mtime - a.mtime);
 
