@@ -1066,7 +1066,7 @@ export class FolderDashBacklogView extends ItemView {
         const systemsArray = Array.from(uniqueSystems).sort();
         const visibilitiesArray = Array.from(uniqueVisibilities).sort();
 
-        const headerContainer = container.createDiv({ attr: { style: 'margin-bottom: 20px; padding-top: 10px; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;' } });
+        const headerContainer = container.createDiv({ cls: 'backlog-header-sticky', attr: { style: 'padding-top: 10px; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;' } });
         headerContainer.createEl('h2', { text: 'バックログボード', attr: { style: 'margin: 0;' } });
 
         const controlsContainer = headerContainer.createDiv({ attr: { style: 'display: flex; gap: 15px; align-items: center; flex-wrap: wrap;' } });

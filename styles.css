@@ -1,3 +1,12 @@
+/* Sticky header for Backlog/Agenda board */
+.backlog-header-sticky {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--background-primary);
+    margin-bottom: 20px;
+}
+
 /* Phase 9: Compact Properties View for Dashboard */
 
 .is-enhance-board-summary .metadata-container {
