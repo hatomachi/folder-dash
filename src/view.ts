@@ -1268,6 +1268,16 @@ latest_update: ""
             }
         }
 
+        // When assignee/doToday filter is active, hide epics with no matching tasks
+        if (this.selectedAssignee !== 'All' || this.doTodayFilterEnabled) {
+            const taskThemes = new Set(tasks.map(t => t.theme));
+            for (const epicPath of Object.keys(epicsMap)) {
+                if (!taskThemes.has(epicPath)) {
+                    delete epicsMap[epicPath];
+                }
+            }
+        }
+
         if (this.currentMode === 'kanban') {
             this.renderKanban(container, tasks);
         } else {
