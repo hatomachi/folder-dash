@@ -208,16 +208,19 @@ export class EpicCreateModal extends Modal {
     onSubmit: (name: string, visibility: string, category: string, system: string) => void;
     epicName: string = '';
     visibility: string;
-    category: string = '維持管理';
+    category: string;
     system: string = '';
     existingSystems: string[];
     visibilitySettings: { name: string, folder: string }[];
+    epicCategories: { id: string, label: string }[];
 
-    constructor(app: App, existingSystems: string[], visibilitySettings: { name: string, folder: string }[], onSubmit: (name: string, visibility: string, category: string, system: string) => void) {
+    constructor(app: App, existingSystems: string[], visibilitySettings: { name: string, folder: string }[], epicCategories: { id: string, label: string }[], onSubmit: (name: string, visibility: string, category: string, system: string) => void) {
         super(app);
         this.existingSystems = existingSystems;
         this.visibilitySettings = visibilitySettings;
+        this.epicCategories = epicCategories;
         this.visibility = visibilitySettings && visibilitySettings.length > 0 ? (visibilitySettings[0]?.name || '') : '';
+        this.category = epicCategories && epicCategories.length > 0 ? (epicCategories[0]?.id || '') : '';
         this.onSubmit = onSubmit;
     }
 
@@ -236,8 +239,8 @@ export class EpicCreateModal extends Modal {
         new Setting(contentEl)
             .setName('カテゴリ')
             .addDropdown(dropdown => {
-                dropdown.addOption('維持管理', '維持管理');
-                dropdown.addOption('個別テーマ', '個別テーマ');
+                this.epicCategories.forEach(c => dropdown.addOption(c.id, c.id));
+                dropdown.setValue(this.category);
                 dropdown.onChange(value => this.category = value);
             });
 
@@ -368,10 +371,12 @@ export class EpicPropertyEditModal extends Modal {
     system: string;
     existingSystems: string[];
     visibilitySettings: { name: string, folder: string }[];
+    epicCategories: { id: string, label: string }[];
 
-    constructor(app: App, initVis: string, initCat: string, initSys: string, existingSystems: string[], visibilitySettings: { name: string, folder: string }[], onSubmit: (visibility: string, category: string, system: string) => void) {
+    constructor(app: App, initVis: string, initCat: string, initSys: string, existingSystems: string[], visibilitySettings: { name: string, folder: string }[], epicCategories: { id: string, label: string }[], onSubmit: (visibility: string, category: string, system: string) => void) {
         super(app);
         this.visibilitySettings = visibilitySettings;
+        this.epicCategories = epicCategories;
         this.visibility = initVis;
         this.category = initCat;
         this.system = initSys;
@@ -395,8 +400,7 @@ export class EpicPropertyEditModal extends Modal {
         new Setting(contentEl)
             .setName('カテゴリ')
             .addDropdown(dropdown => {
-                dropdown.addOption('維持管理', '維持管理');
-                dropdown.addOption('個別テーマ', '個別テーマ');
+                this.epicCategories.forEach(c => dropdown.addOption(c.id, c.id));
                 dropdown.setValue(this.category);
                 dropdown.onChange(value => this.category = value);
             });
@@ -1197,7 +1201,7 @@ export class FolderDashBacklogView extends ItemView {
 
         const newEpicBtn = controlsContainer.createEl('button', { text: '＋ 新規エピック', cls: 'mod-cta', attr: { style: 'padding: 4px 12px; height: auto;' } });
         newEpicBtn.onclick = () => {
-            new EpicCreateModal(this.app, systemsArray, this.plugin.settings.visibilitySettings, async (name, visibility, category, system) => {
+            new EpicCreateModal(this.app, systemsArray, this.plugin.settings.visibilitySettings, this.plugin.settings.epicCategories, async (name: string, visibility: string, category: string, system: string) => {
                 const visConf = this.plugin.settings.visibilitySettings.find(v => v.name === visibility);
                 const baseFolder = visConf ? visConf.folder : 'shared';
                 const folderPath = normalizePath(`${baseFolder}/${category}/${system}/${name}`);
@@ -1389,7 +1393,7 @@ latest_update: ""
                                 .filter(s => s && s !== '未分類')
                             ));
 
-                            new EpicPropertyEditModal(this.app, epicData.visibility, epicData.category, epicData.system, existingSystems as string[], this.plugin.settings.visibilitySettings, async (newVis, newCat, newSys) => {
+                            new EpicPropertyEditModal(this.app, epicData.visibility, epicData.category, epicData.system, existingSystems as string[], this.plugin.settings.visibilitySettings, this.plugin.settings.epicCategories, async (newVis: string, newCat: string, newSys: string) => {
                                 let didChange = false;
                                 let didMove = false;
 
@@ -1530,14 +1534,18 @@ latest_update: ""
             }
         };
 
-        renderCategorySection('🛠 維持管理', '維持管理');
-        renderCategorySection('🚀 個別テーマ', '個別テーマ');
+        const epicCats = this.plugin.settings.epicCategories || [];
+        const knownCatIds = new Set(epicCats.map(c => c.id));
 
-        // Ensure themes that don't match exactly those two still get rendered
+        for (const cat of epicCats) {
+            renderCategorySection(cat.label, cat.id);
+        }
+
+        // Settings に存在しないカテゴリのエピックは「その他」としてまとめて表示
         const otherThemes = allThemes.filter(theme => {
             const epic = epicsMap[theme];
             const cat = epic ? epic.category : 'その他';
-            return cat !== '維持管理' && cat !== '個別テーマ';
+            return !knownCatIds.has(cat);
         });
         if (otherThemes.length > 0) {
             renderCategorySection('📦 その他', 'その他');
