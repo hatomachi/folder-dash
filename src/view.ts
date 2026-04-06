@@ -988,7 +988,7 @@ export class FolderDashBacklogView extends ItemView {
 
         const summaryPaths = (this.app.metadataCache as any).getCachedFiles().filter((path: string) => path.endsWith(TASK_MARKER_FILE));
 
-        type EpicData = { path: string, overview: string, schedule: string, file: TFile, visibility: string, category: string, system: string };
+        type EpicData = { name: string, path: string, overview: string, schedule: string, file: TFile, visibility: string, category: string, system: string };
         const epicsMap: Record<string, EpicData> = {};
         const epicFilePaths = (this.app.metadataCache as any).getCachedFiles().filter((p: string) => p.endsWith(EPIC_MARKER_FILE));
         const uniqueSystems = new Set<string>();
@@ -1005,7 +1005,8 @@ export class FolderDashBacklogView extends ItemView {
                 const category = fm['category'] || '維持管理';
                 const system = fm['system'] || '未分類';
 
-                epicsMap[epicFile.parent.name] = {
+                epicsMap[epicFile.parent.path] = {
+                    name: epicFile.parent.name,
                     path: epicFile.parent.path,
                     overview: fm['overview'] || '',
                     schedule: fm['schedule'] || '',
@@ -1035,11 +1036,20 @@ export class FolderDashBacklogView extends ItemView {
 
                     const epicInfo = this.getEpicInfoForTask(abstractFile);
                     let theme = fm['theme'] || fm['epic'];
+                    let themeIsPath = false;
                     let epicPath = '/';
                     if (!theme) {
-                        theme = epicInfo ? epicInfo.name : (abstractFile.parent?.parent?.name || '未分類');
+                        theme = epicInfo ? epicInfo.path : (abstractFile.parent?.parent?.path || '/');
+                        themeIsPath = true;
                         epicPath = epicInfo ? epicInfo.path : (abstractFile.parent?.parent?.path || '/');
                     } else {
+                        // If theme is provided manually in frontmatter, we try to match it by name or path
+                        // For consistency, we'll try to find a matching path if a name was provided
+                        const matchedEpic = Object.values(epicsMap).find(e => e.name === theme || e.path === theme);
+                        if (matchedEpic) {
+                            theme = matchedEpic.path;
+                            themeIsPath = true;
+                        }
                         epicPath = epicInfo ? epicInfo.path : (abstractFile.parent?.parent?.path || '/');
                     }
 
@@ -1232,6 +1242,13 @@ latest_update: ""
             if (this.doTodayFilterEnabled && !task.do_today) return false;
 
             const epicData = epicsMap[task.theme];
+            // Fallback for manual theme strings that didn't resolve to a path
+            if (!epicData && task.theme && task.theme !== '未分類' && task.theme !== '/') {
+                // If we can't find epic data by path, try to filter by the theme string itself (legacy fallback)
+                const legacyEpic = Object.values(epicsMap).find(e => e.name === task.theme);
+                if (legacyEpic && this.hiddenSystems.has(legacyEpic.system)) return false;
+            }
+
             if (epicData && this.hiddenSystems.has(epicData.system)) return false;
             if (this.selectedVisibility !== 'All' && (!epicData || epicData.visibility !== this.selectedVisibility)) return false;
 
@@ -1303,7 +1320,12 @@ latest_update: ""
             }
         }
 
-        const allThemes = Object.keys(grouped).sort();
+        const allThemes = Object.keys(grouped).sort((a, b) => {
+            const epicA = epicsMap[a];
+            const epicB = epicsMap[b];
+            if (epicA && epicB) return epicA.name.localeCompare(epicB.name);
+            return a.localeCompare(b);
+        });
 
         const renderCategorySection = (categoryTitle: string, filterCategory: string) => {
             const categoryThemes = allThemes.filter(theme => {
@@ -1340,9 +1362,10 @@ latest_update: ""
 
                     const summaryLeft = themeSummary.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 5px; flex-grow: 1;' } });
                     const titleRow = summaryLeft.createDiv({ attr: { style: 'display: flex; align-items: center; gap: 10px;' } });
-                    titleRow.createEl('h3', { text: `📁 ${theme}`, attr: { style: 'margin: 0; display: inline-block;' } });
 
                     const epicData = epicsMap[theme];
+                    const displayedName = epicData ? epicData.name : theme;
+                    titleRow.createEl('h3', { text: `📁 ${displayedName}`, attr: { style: 'margin: 0; display: inline-block;' } });
                     const overviewText = epicData ? epicData.overview : '';
                     const scheduleText = epicData ? epicData.schedule : '';
 
@@ -1373,7 +1396,7 @@ latest_update: ""
                                 // Check path changes and move directory
                                 const visConf = this.plugin.settings.visibilitySettings.find(v => v.name === newVis);
                                 const baseFolder = visConf ? visConf.folder : 'shared';
-                                const newFolderPath = normalizePath(`${baseFolder}/${newCat}/${newSys}/${theme}`);
+                                const newFolderPath = normalizePath(`${baseFolder}/${newCat}/${newSys}/${epicData.name}`);
 
                                 if (epicData.path !== newFolderPath) {
                                     try {
