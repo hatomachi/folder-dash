@@ -6,10 +6,16 @@ export interface NoteCategory {
 	name: string;
 }
 
+export interface VisibilityClassification {
+	name: string;
+	folder: string;
+}
+
 export interface FolderDashSettings {
 	defaultStatus: string;
 	noteCategories: NoteCategory[];
 	blockReasons: string[];
+	visibilitySettings: VisibilityClassification[];
 }
 
 export const DEFAULT_SETTINGS: FolderDashSettings = {
@@ -21,7 +27,11 @@ export const DEFAULT_SETTINGS: FolderDashSettings = {
 		{ id: 'meeting', name: '📅 打合せ' },
 		{ id: 'memo', name: '📝 メモ' }
 	],
-	blockReasons: ['休憩', '別作業に入るため', '退勤']
+	blockReasons: ['休憩', '別作業に入るため', '退勤'],
+	visibilitySettings: [
+		{ name: '社員限定', folder: 'kb_nrionly' },
+		{ name: '開発会社共用', folder: 'kb_shared' }
+	]
 }
 
 export class FolderDashSettingTab extends PluginSettingTab {
@@ -123,6 +133,51 @@ export class FolderDashSettingTab extends PluginSettingTab {
 				.setCta()
 				.onClick(async () => {
 					this.plugin.settings.blockReasons.push('新しい理由');
+					await this.plugin.saveSettings();
+					this.display(); // 再描画
+					this.display(); // 再描画
+				})
+			);
+
+		containerEl.createEl('h3', { text: '公開範囲（Visibility）のカスタマイズ' });
+		containerEl.createEl('p', { text: 'ダッシュボード上で選択できる公開範囲とその保存フォルダ名を定義します。' });
+
+		this.plugin.settings.visibilitySettings.forEach((visibility, index) => {
+			new Setting(containerEl)
+				.setName(`公開範囲 ${index + 1}`)
+				.addText(text => text
+					.setPlaceholder('表示名 (e.g. 社員限定)')
+					.setValue(visibility.name)
+					.onChange(async (value) => {
+						visibility.name = value;
+						await this.plugin.saveSettings();
+					})
+				)
+				.addText(text => text
+					.setPlaceholder('フォルダ名 (e.g. nrionly)')
+					.setValue(visibility.folder)
+					.onChange(async (value) => {
+						visibility.folder = value;
+						await this.plugin.saveSettings();
+					})
+				)
+				.addButton(btn => btn
+					.setButtonText('削除')
+					.setWarning()
+					.onClick(async () => {
+						this.plugin.settings.visibilitySettings.splice(index, 1);
+						await this.plugin.saveSettings();
+						this.display(); // 再描画
+					})
+				);
+		});
+
+		new Setting(containerEl)
+			.addButton(btn => btn
+				.setButtonText('公開範囲を追加')
+				.setCta()
+				.onClick(async () => {
+					this.plugin.settings.visibilitySettings.push({ name: '新規公開範囲', folder: 'new-folder' });
 					await this.plugin.saveSettings();
 					this.display(); // 再描画
 				})

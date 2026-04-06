@@ -207,14 +207,17 @@ export class LatestUpdateModal extends Modal {
 export class EpicCreateModal extends Modal {
     onSubmit: (name: string, visibility: string, category: string, system: string) => void;
     epicName: string = '';
-    visibility: string = '社員限定';
+    visibility: string;
     category: string = '維持管理';
     system: string = '';
     existingSystems: string[];
+    visibilitySettings: { name: string, folder: string }[];
 
-    constructor(app: App, existingSystems: string[], onSubmit: (name: string, visibility: string, category: string, system: string) => void) {
+    constructor(app: App, existingSystems: string[], visibilitySettings: { name: string, folder: string }[], onSubmit: (name: string, visibility: string, category: string, system: string) => void) {
         super(app);
         this.existingSystems = existingSystems;
+        this.visibilitySettings = visibilitySettings;
+        this.visibility = visibilitySettings && visibilitySettings.length > 0 ? (visibilitySettings[0]?.name || '') : '';
         this.onSubmit = onSubmit;
     }
 
@@ -225,8 +228,8 @@ export class EpicCreateModal extends Modal {
         new Setting(contentEl)
             .setName('公開範囲')
             .addDropdown(dropdown => {
-                dropdown.addOption('社員限定', '社員限定');
-                dropdown.addOption('開発会社共用', '開発会社共用');
+                this.visibilitySettings.forEach(v => dropdown.addOption(v.name, v.name));
+                dropdown.setValue(this.visibility);
                 dropdown.onChange(value => this.visibility = value);
             });
 
@@ -364,9 +367,11 @@ export class EpicPropertyEditModal extends Modal {
     category: string;
     system: string;
     existingSystems: string[];
+    visibilitySettings: { name: string, folder: string }[];
 
-    constructor(app: App, initVis: string, initCat: string, initSys: string, existingSystems: string[], onSubmit: (visibility: string, category: string, system: string) => void) {
+    constructor(app: App, initVis: string, initCat: string, initSys: string, existingSystems: string[], visibilitySettings: { name: string, folder: string }[], onSubmit: (visibility: string, category: string, system: string) => void) {
         super(app);
+        this.visibilitySettings = visibilitySettings;
         this.visibility = initVis;
         this.category = initCat;
         this.system = initSys;
@@ -382,8 +387,7 @@ export class EpicPropertyEditModal extends Modal {
         new Setting(contentEl)
             .setName('公開範囲')
             .addDropdown(dropdown => {
-                dropdown.addOption('社員限定', '社員限定');
-                dropdown.addOption('開発会社共用', '開発会社共用');
+                this.visibilitySettings.forEach(v => dropdown.addOption(v.name, v.name));
                 dropdown.setValue(this.visibility);
                 dropdown.onChange(value => this.visibility = value);
             });
@@ -995,7 +999,9 @@ export class FolderDashBacklogView extends ItemView {
             if (epicFile instanceof TFile && epicFile.parent) {
                 const cache = this.app.metadataCache.getFileCache(epicFile);
                 const fm = cache?.frontmatter || {};
-                const visibility = fm['visibility'] || '社員限定';
+                const visSettings = this.plugin.settings.visibilitySettings;
+                const defaultVis = visSettings && visSettings.length > 0 ? (visSettings[0]?.name || '') : '';
+                const visibility = fm['visibility'] || defaultVis;
                 const category = fm['category'] || '維持管理';
                 const system = fm['system'] || '未分類';
 
@@ -1181,8 +1187,9 @@ export class FolderDashBacklogView extends ItemView {
 
         const newEpicBtn = controlsContainer.createEl('button', { text: '＋ 新規エピック', cls: 'mod-cta', attr: { style: 'padding: 4px 12px; height: auto;' } });
         newEpicBtn.onclick = () => {
-            new EpicCreateModal(this.app, systemsArray, async (name, visibility, category, system) => {
-                const baseFolder = visibility === '社員限定' ? 'nrionly' : 'shared';
+            new EpicCreateModal(this.app, systemsArray, this.plugin.settings.visibilitySettings, async (name, visibility, category, system) => {
+                const visConf = this.plugin.settings.visibilitySettings.find(v => v.name === visibility);
+                const baseFolder = visConf ? visConf.folder : 'shared';
                 const folderPath = normalizePath(`${baseFolder}/${category}/${system}/${name}`);
 
                 try {
@@ -1359,12 +1366,13 @@ latest_update: ""
                                 .filter(s => s && s !== '未分類')
                             ));
 
-                            new EpicPropertyEditModal(this.app, epicData.visibility, epicData.category, epicData.system, existingSystems as string[], async (newVis, newCat, newSys) => {
+                            new EpicPropertyEditModal(this.app, epicData.visibility, epicData.category, epicData.system, existingSystems as string[], this.plugin.settings.visibilitySettings, async (newVis, newCat, newSys) => {
                                 let didChange = false;
                                 let didMove = false;
 
                                 // Check path changes and move directory
-                                const baseFolder = newVis === '社員限定' ? 'nrionly' : 'shared';
+                                const visConf = this.plugin.settings.visibilitySettings.find(v => v.name === newVis);
+                                const baseFolder = visConf ? visConf.folder : 'shared';
                                 const newFolderPath = normalizePath(`${baseFolder}/${newCat}/${newSys}/${theme}`);
 
                                 if (epicData.path !== newFolderPath) {
