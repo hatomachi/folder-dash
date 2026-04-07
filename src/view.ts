@@ -214,27 +214,28 @@ export class EpicCreateModal extends Modal {
     visibilitySettings: { name: string, folder: string }[];
     epicCategories: { id: string, label: string }[];
 
-    constructor(app: App, existingSystems: string[], visibilitySettings: { name: string, folder: string }[], epicCategories: { id: string, label: string }[], onSubmit: (name: string, visibility: string, category: string, system: string) => void) {
+    constructor(
+        app: App, 
+        existingSystems: string[], 
+        visibilitySettings: { name: string, folder: string }[], 
+        epicCategories: { id: string, label: string }[], 
+        onSubmit: (name: string, visibility: string, category: string, system: string) => void,
+        defaultCategory?: string,
+        defaultSystem?: string
+    ) {
         super(app);
         this.existingSystems = existingSystems;
         this.visibilitySettings = visibilitySettings;
         this.epicCategories = epicCategories;
         this.visibility = visibilitySettings && visibilitySettings.length > 0 ? (visibilitySettings[0]?.name || '') : '';
-        this.category = epicCategories && epicCategories.length > 0 ? (epicCategories[0]?.id || '') : '';
+        this.category = defaultCategory || (epicCategories && epicCategories.length > 0 ? (epicCategories[0]?.id || '') : '');
+        this.system = defaultSystem || '';
         this.onSubmit = onSubmit;
     }
 
     onOpen() {
         const { contentEl } = this;
         contentEl.createEl('h2', { text: '新規エピックの作成' });
-
-        new Setting(contentEl)
-            .setName('公開範囲')
-            .addDropdown(dropdown => {
-                this.visibilitySettings.forEach(v => dropdown.addOption(v.name, v.name));
-                dropdown.setValue(this.visibility);
-                dropdown.onChange(value => this.visibility = value);
-            });
 
         new Setting(contentEl)
             .setName('カテゴリ')
@@ -253,6 +254,7 @@ export class EpicCreateModal extends Modal {
             .setName('システム')
             .addText(text => {
                 text.inputEl.setAttribute('list', 'epic-system-list');
+                if (this.system) text.setValue(this.system);
                 text.onChange(value => {
                     this.system = value;
                 }).inputEl.addEventListener('keydown', (e) => {
@@ -275,6 +277,14 @@ export class EpicCreateModal extends Modal {
                     }
                 })
             );
+
+        new Setting(contentEl)
+            .setName('公開範囲')
+            .addDropdown(dropdown => {
+                this.visibilitySettings.forEach(v => dropdown.addOption(v.name, v.name));
+                dropdown.setValue(this.visibility);
+                dropdown.onChange(value => this.visibility = value);
+            });
 
         new Setting(contentEl)
             .addButton((btn) =>
@@ -1098,6 +1108,45 @@ export class FolderDashBacklogView extends ItemView {
         return null;
     }
 
+    async handleEpicCreate(name: string, visibility: string, category: string, system: string) {
+        const visConf = this.plugin.settings.visibilitySettings.find(v => v.name === visibility);
+        const baseFolder = visConf ? visConf.folder : 'shared';
+        const folderPath = normalizePath(`${baseFolder}/${category}/${system}/${name}`);
+
+        try {
+            // Create intermediate folders if they don't exist
+            const parts = folderPath.split('/');
+            let currentPath = '';
+            for (const part of parts) {
+                if (!part) continue;
+                currentPath = currentPath ? `${currentPath}/${part}` : part;
+                const existing = this.app.vault.getAbstractFileByPath(currentPath);
+                if (!existing) {
+                    await this.app.vault.createFolder(currentPath);
+                }
+            }
+
+            const epicFilePath = normalizePath(`${folderPath}/${EPIC_MARKER_FILE}`);
+            const now = new Date().toISOString();
+            const content = `---
+title: "${name}"
+status: "未着手"
+visibility: "${visibility}"
+category: "${category}"
+system: "${system}"
+created_at: "${now}"
+latest_update: ""
+---
+`;
+            await this.app.vault.create(epicFilePath, content);
+            new Notice(`エピック「${name}」を作成しました`);
+            this.renderBoard();
+        } catch (e: any) {
+            console.error(e);
+            new Notice(`作成失敗: フォルダ作成中にエラーが発生しました`);
+        }
+    }
+
     async onOpen() {
         await this.renderBoard();
 
@@ -1374,44 +1423,7 @@ export class FolderDashBacklogView extends ItemView {
 
         const newEpicBtn = controlsContainer.createEl('button', { text: '＋ 新規エピック', cls: 'mod-cta', attr: { style: 'padding: 4px 12px; height: auto;' } });
         newEpicBtn.onclick = () => {
-            new EpicCreateModal(this.app, systemsArray, this.plugin.settings.visibilitySettings, this.plugin.settings.epicCategories, async (name: string, visibility: string, category: string, system: string) => {
-                const visConf = this.plugin.settings.visibilitySettings.find(v => v.name === visibility);
-                const baseFolder = visConf ? visConf.folder : 'shared';
-                const folderPath = normalizePath(`${baseFolder}/${category}/${system}/${name}`);
-
-                try {
-                    // Create intermediate folders if they don't exist
-                    const parts = folderPath.split('/');
-                    let currentPath = '';
-                    for (const part of parts) {
-                        if (!part) continue;
-                        currentPath = currentPath ? `${currentPath}/${part}` : part;
-                        const existing = this.app.vault.getAbstractFileByPath(currentPath);
-                        if (!existing) {
-                            await this.app.vault.createFolder(currentPath);
-                        }
-                    }
-
-                    const epicFilePath = normalizePath(`${folderPath}/${EPIC_MARKER_FILE}`);
-                    const now = new Date().toISOString();
-                    const content = `---
-title: "${name}"
-status: "未着手"
-visibility: "${visibility}"
-category: "${category}"
-system: "${system}"
-created_at: "${now}"
-latest_update: ""
----
-`;
-                    await this.app.vault.create(epicFilePath, content);
-                    new Notice(`エピック「${name}」を作成しました`);
-                    this.renderBoard();
-                } catch (e: any) {
-                    console.error(e);
-                    new Notice(`作成失敗: フォルダ作成中にエラーが発生しました`);
-                }
-            }).open();
+            new EpicCreateModal(this.app, systemsArray, this.plugin.settings.visibilitySettings, this.plugin.settings.epicCategories, this.handleEpicCreate.bind(this)).open();
         };
 
         const keywords = this.searchQuery.toLowerCase().split(/[\s　]+/).filter(k => k.length > 0);
@@ -1501,6 +1513,11 @@ latest_update: ""
     }
 
     renderAgenda(container: HTMLElement, tasks: any[], epicsMap: Record<string, any>) {
+        const systemsArray = Array.from(new Set(Object.values(epicsMap)
+            .map((e: any) => e.system)
+            .filter(s => s && s !== '未分類')
+        )).sort() as string[];
+        
         const agendaDiv = container.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 20px; padding-bottom: 20px;' } });
 
         // Group tasks by their theme
@@ -1741,6 +1758,23 @@ latest_update: ""
                         }
                     }
                 }
+
+                const inlineAddContainer = sectionDiv.createDiv({ attr: { style: 'margin-top: 5px; margin-bottom: 20px; padding-left: 10px;' } });
+                const inlineAddBtn = inlineAddContainer.createEl('button', {
+                    text: `＋ 「${sys}」にエピックを追加`,
+                    attr: { style: 'background: transparent; border: 1px dashed var(--interactive-accent); color: var(--interactive-accent); font-size: 0.85em; padding: 4px 12px; border-radius: 4px; cursor: pointer; opacity: 0.8;' }
+                });
+                inlineAddBtn.onclick = () => {
+                    new EpicCreateModal(
+                        this.app, 
+                        systemsArray, 
+                        this.plugin.settings.visibilitySettings, 
+                        this.plugin.settings.epicCategories, 
+                        this.handleEpicCreate.bind(this),
+                        this.plugin.settings.epicCategories.find(c => c.id === filterCategory) ? filterCategory : undefined,
+                        sys
+                    ).open();
+                };
             }
         };
 
