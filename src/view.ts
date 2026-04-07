@@ -1062,6 +1062,10 @@ export class FolderDashBacklogView extends ItemView {
     systemFilterOpen: boolean = false;
     selectedVisibility: string = 'All';
     doTodayFilterEnabled: boolean = false;
+    searchQuery: string = '';
+    isSearchFocused: boolean = false;
+    searchCursorStart: number = 0;
+    isSearchComposing: boolean = false;
 
     constructor(leaf: WorkspaceLeaf, plugin: FolderDashPlugin) {
         super(leaf);
@@ -1295,6 +1299,42 @@ export class FolderDashBacklogView extends ItemView {
             this.renderBoard();
         };
 
+        const searchInput = controlsContainer.createEl('input', { type: 'text', placeholder: 'パス検索 (複数キーワード可)...', cls: 'folder-dash-search-input', attr: { style: 'padding: 4px 8px; border-radius: 4px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); color: var(--text-normal); width: 220px;' } });
+        searchInput.value = this.searchQuery;
+        
+        searchInput.addEventListener('focus', () => { this.isSearchFocused = true; });
+        searchInput.addEventListener('blur', () => { this.isSearchFocused = false; });
+        searchInput.addEventListener('compositionstart', () => { this.isSearchComposing = true; });
+        searchInput.addEventListener('compositionend', (e: Event) => { 
+            this.isSearchComposing = false;
+            const el = e.target as HTMLInputElement;
+            this.searchQuery = el.value;
+            this.searchCursorStart = el.selectionStart || 0;
+            this.isSearchFocused = true;
+            this.renderBoard();
+        });
+        
+        searchInput.oninput = (e) => {
+            if (this.isSearchComposing) return;
+            const el = e.target as HTMLInputElement;
+            this.searchQuery = el.value;
+            this.searchCursorStart = el.selectionStart || 0;
+            this.isSearchFocused = true;
+            this.renderBoard();
+        };
+
+        if (this.isSearchFocused) {
+            setTimeout(() => {
+                const el = container.querySelector('.folder-dash-search-input') as HTMLInputElement;
+                if (el && !this.isSearchComposing) {
+                    el.focus();
+                    try {
+                        el.setSelectionRange(this.searchCursorStart, this.searchCursorStart);
+                    } catch (e) {}
+                }
+            }, 0);
+        }
+
         const doTodayBtn = controlsContainer.createEl('button', { text: '🌟 今日やる', attr: { style: this.doTodayFilterEnabled ? 'background-color: var(--color-yellow, #e6b12a); color: #fff; font-weight: bold; border: none;' : 'background-color: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted);' } });
         doTodayBtn.onclick = () => {
             this.doTodayFilterEnabled = !this.doTodayFilterEnabled;
@@ -1369,6 +1409,8 @@ latest_update: ""
             }).open();
         };
 
+        const keywords = this.searchQuery.toLowerCase().split(/[\s　]+/).filter(k => k.length > 0);
+
         const tasks = allTasks.filter(task => {
             if (this.selectedAssignee !== 'All' && !task.assignees.includes(this.selectedAssignee)) return false;
             if (this.doTodayFilterEnabled && !task.do_today) return false;
@@ -1384,6 +1426,13 @@ latest_update: ""
             if (epicData && this.hiddenSystems.has(epicData.system)) return false;
             if (this.selectedVisibility !== 'All' && (!epicData || epicData.visibility !== this.selectedVisibility)) return false;
 
+            if (keywords.length > 0) {
+                const taskPath = task.file.path.toLowerCase();
+                if (!keywords.every(kw => taskPath.includes(kw))) {
+                    return false;
+                }
+            }
+
             return true;
         });
 
@@ -1393,6 +1442,13 @@ latest_update: ""
                 delete epicsMap[themeName];
             } else if (this.selectedVisibility !== 'All' && epicData.visibility !== this.selectedVisibility) {
                 delete epicsMap[themeName];
+            } else if (keywords.length > 0) {
+                const epicPath = epicData.file.path.toLowerCase();
+                const epicMatches = keywords.every(kw => epicPath.includes(kw));
+                const hasMatchingTasks = tasks.some(t => t.theme === themeName);
+                if (!epicMatches && !hasMatchingTasks) {
+                    delete epicsMap[themeName];
+                }
             }
         }
 
