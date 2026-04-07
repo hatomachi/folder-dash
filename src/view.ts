@@ -1110,6 +1110,17 @@ export class FolderDashBacklogView extends ItemView {
 
     async renderBoard() {
         const container = this.contentEl;
+        
+        const activeEl = document.activeElement;
+        if (activeEl && activeEl.classList && activeEl.classList.contains('folder-dash-search-input')) {
+            this.isSearchFocused = true;
+            try {
+                this.searchCursorStart = (activeEl as HTMLInputElement).selectionStart || 0;
+            } catch (e) {}
+        } else {
+            this.isSearchFocused = false;
+        }
+
         container.empty();
         container.classList.add('folder-dash-board-view');
 
@@ -1302,15 +1313,11 @@ export class FolderDashBacklogView extends ItemView {
         const searchInput = controlsContainer.createEl('input', { type: 'text', placeholder: 'パス検索 (複数キーワード可)...', cls: 'folder-dash-search-input', attr: { style: 'padding: 4px 8px; border-radius: 4px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); color: var(--text-normal); width: 220px;' } });
         searchInput.value = this.searchQuery;
         
-        searchInput.addEventListener('focus', () => { this.isSearchFocused = true; });
-        searchInput.addEventListener('blur', () => { this.isSearchFocused = false; });
         searchInput.addEventListener('compositionstart', () => { this.isSearchComposing = true; });
         searchInput.addEventListener('compositionend', (e: Event) => { 
             this.isSearchComposing = false;
             const el = e.target as HTMLInputElement;
             this.searchQuery = el.value;
-            this.searchCursorStart = el.selectionStart || 0;
-            this.isSearchFocused = true;
             this.renderBoard();
         });
         
@@ -1318,8 +1325,6 @@ export class FolderDashBacklogView extends ItemView {
             if (this.isSearchComposing) return;
             const el = e.target as HTMLInputElement;
             this.searchQuery = el.value;
-            this.searchCursorStart = el.selectionStart || 0;
-            this.isSearchFocused = true;
             this.renderBoard();
         };
 
@@ -1332,7 +1337,7 @@ export class FolderDashBacklogView extends ItemView {
                         el.setSelectionRange(this.searchCursorStart, this.searchCursorStart);
                     } catch (e) {}
                 }
-            }, 0);
+            }, 10);
         }
 
         const doTodayBtn = controlsContainer.createEl('button', { text: '🌟 今日やる', attr: { style: this.doTodayFilterEnabled ? 'background-color: var(--color-yellow, #e6b12a); color: #fff; font-weight: bold; border: none;' : 'background-color: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted);' } });
