@@ -604,6 +604,11 @@ export class FolderDashView extends ItemView {
             return;
         }
 
+        if (this.activeFile && this.activeFile.name === EPIC_MARKER_FILE) {
+            await this.renderEpicDashboard(container, this.currentFolder, this.activeFile);
+            return;
+        }
+
         const parentFolder = this.currentFolder;
         container.createEl('h2', { text: `${parentFolder.name}`, attr: { style: 'margin-bottom: 20px;' } });
 
@@ -886,6 +891,103 @@ assignee: ${currentUser}${typeProp}
                 li.innerHTML = `${actionIcon} ${t} - <b>${String(h.action).toUpperCase()}</b>${h.user ? ` <span style="color:var(--text-muted)">by</span> ${h.user}` : ''}${h.reason ? `<br><span style="color:var(--text-muted); padding-left: 15px;">理由: ${h.reason}</span>` : ''}`;
             }
         }
+    }
+
+    private async renderEpicDashboard(container: HTMLElement, parentFolder: TFolder, epicFile: TFile) {
+        const cache = this.app.metadataCache.getFileCache(epicFile);
+        const fm = cache?.frontmatter || {};
+
+        const HeaderContainer = container.createDiv({ attr: { style: 'display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;' } });
+        const title = fm['title'] || parentFolder.name;
+        HeaderContainer.createEl('h2', { text: `${title}`, attr: { style: 'margin: 0; font-size: 1.4em; word-break: break-all;' } });
+
+        const addTaskBtn = HeaderContainer.createEl('button', { text: '＋ タスク追加', cls: 'mod-cta', attr: { style: 'padding: 4px 10px; height: auto;' } });
+        addTaskBtn.onclick = () => {
+            new TaskCreateModal(this.app, parentFolder.path, async (taskName: string) => {
+                const taskFolderPath = parentFolder.path === '/' ? normalizePath(taskName) : normalizePath(`${parentFolder.path}/${taskName}`);
+                try {
+                    await this.app.vault.createFolder(taskFolderPath);
+                    const taskFilePath = normalizePath(`${taskFolderPath}/${TASK_MARKER_FILE}`);
+                    const now = new Date().toISOString();
+                    const defaultStatus = this.plugin.settings.defaultStatus || '未着手';
+                    let relPathToEpic = parentFolder.path;
+                    const content = `---
+title: "${taskName}"
+status: "${defaultStatus}"
+assignee: "未設定"
+created_at: "${now}"
+latest_update: ""
+theme: "${relPathToEpic}"
+---
+`;
+                    await this.app.vault.create(taskFilePath, content);
+                    new Notice(`タスク「${taskName}」を作成しました`);
+                } catch (e: any) {
+                    console.error(e);
+                    new Notice(`作成失敗: 同名のフォルダが既に存在する可能性があります`);
+                }
+            }).open();
+        };
+
+        const badgesRow = container.createDiv({ attr: { style: 'display: flex; gap: 6px; margin-bottom: 20px; align-items: center; flex-wrap: wrap;' } });
+        const visibility = fm['visibility'] || '未設定';
+        const category = fm['category'] || '未分類';
+        const system = fm['system'] || '未設定';
+
+        const createBadge = (text: string, color: string) => {
+            badgesRow.createSpan({ text, attr: { style: `font-size: 0.8em; padding: 3px 8px; border-radius: 4px; background: ${color}; color: var(--text-normal); border: 1px solid var(--background-modifier-border); font-weight: bold;` } });
+        };
+        createBadge(visibility, 'var(--background-secondary-alt)');
+        createBadge(category, 'var(--background-secondary-alt)');
+        createBadge(system, 'var(--interactive-accent-hover)');
+
+        const createTextareaSection = (label: string, fmKey: string, height: string, withToolbar = false) => {
+            container.createEl('h4', { text: label, attr: { style: 'margin-bottom: 5px; margin-top: 15px;' } });
+            
+            let textArea: HTMLTextAreaElement;
+            if (withToolbar) {
+                const toolbar = container.createDiv({ attr: { style: 'display: flex; gap: 8px; margin-bottom: 8px;' } });
+                textArea = container.createEl('textarea', { attr: { style: `width: 100%; height: ${height}; margin-bottom: 10px; resize: vertical; font-family: inherit; padding: 8px; border-radius: 4px; background: var(--background-primary); border: 1px solid var(--background-modifier-border);` } });
+                
+                const wrapText = async (color: string) => {
+                    const start = textArea.selectionStart;
+                    const end = textArea.selectionEnd;
+                    const text = textArea.value;
+                    const selectedText = text.substring(start, end);
+                    if (!selectedText) {
+                        new Notice('テキストを選択してください');
+                        return;
+                    }
+                    const before = text.substring(0, start);
+                    const after = text.substring(end);
+                    textArea.value = `${before}<span style="color: ${color};">${selectedText}</span>${after}`;
+                    await saveValue();
+                    textArea.focus();
+                    textArea.setSelectionRange(start, start + selectedText.length + 23 + color.length + 9);
+                };
+                
+                const redBtn = toolbar.createEl('button', { text: '🔴 赤字', attr: { style: 'font-size: 0.8em; padding: 4px 8px; height: auto;' } });
+                redBtn.onclick = () => wrapText('red');
+                const blueBtn = toolbar.createEl('button', { text: '🔵 青字', attr: { style: 'font-size: 0.8em; padding: 4px 8px; height: auto;' } });
+                blueBtn.onclick = () => wrapText('blue');
+            } else {
+                textArea = container.createEl('textarea', { attr: { style: `width: 100%; height: ${height}; margin-bottom: 10px; resize: vertical; font-family: inherit; padding: 8px; border-radius: 4px; background: var(--background-primary); border: 1px solid var(--background-modifier-border);` } });
+            }
+
+            textArea.value = fm[fmKey] || '';
+
+            const saveValue = async () => {
+                await this.app.fileManager.processFrontMatter(epicFile, (frontmatter) => {
+                    frontmatter[fmKey] = textArea.value;
+                });
+            };
+
+            textArea.addEventListener('change', saveValue);
+        };
+
+        createTextareaSection('概況 (overview)', 'overview', '100px');
+        createTextareaSection('スケジュール (schedule)', 'schedule', '100px');
+        createTextareaSection('最新状況 (latest_update)', 'latest_update', '150px', true);
     }
 }
 
@@ -1396,7 +1498,18 @@ latest_update: ""
 
                     const epicData = epicsMap[theme];
                     const displayedName = epicData ? epicData.name : theme;
-                    titleRow.createEl('h3', { text: `📁 ${displayedName}`, attr: { style: 'margin: 0; display: inline-block;' } });
+                    const titleRowInner = titleRow.createDiv({ attr: { style: 'display: flex; align-items: center; gap: 6px;' } });
+                    titleRowInner.createEl('h3', { text: `📁 ${displayedName}`, attr: { style: 'margin: 0; display: inline-block;' } });
+                    
+                    if (epicData && epicData.file) {
+                        const linkBtn = titleRowInner.createEl('button', { text: '📄', attr: { title: 'Epicを開く（左ペインに詳細表示）', style: 'background: transparent; border: none; box-shadow: none; cursor: pointer; padding: 2px 5px; font-size: 1.1em; opacity: 0.7;' } });
+                        linkBtn.onclick = async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            await this.app.workspace.getLeaf(false).openFile(epicData.file);
+                        };
+                    }
+                    
                     const overviewText = epicData ? epicData.overview : '';
                     const scheduleText = epicData ? epicData.schedule : '';
 
