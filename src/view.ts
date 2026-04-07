@@ -625,7 +625,8 @@ export class FolderDashView extends ItemView {
         const summaryCache = this.app.metadataCache.getFileCache(summaryFile);
         const sfm = summaryCache?.frontmatter || {};
 
-        const currentAssignee = sfm['assignee'] || '未設定';
+        const currentAssigneeRaw = sfm['assignee'];
+        const currentAssignee = Array.isArray(currentAssigneeRaw) ? currentAssigneeRaw.join(', ') : (currentAssigneeRaw || '未設定');
         const currentStatus = sfm['status'] || 'not-started';
         const workTimeMins = sfm['work_time_minutes'] || 0;
         const blockTimeMins = sfm['block_time_minutes'] || 0;
@@ -738,10 +739,17 @@ export class FolderDashView extends ItemView {
                 const cache = this.app.metadataCache.getFileCache(child);
                 const frontmatter = cache?.frontmatter;
 
+                let assigneeStr = '未設定';
+                if (frontmatter) {
+                    const rawAssignee = frontmatter['assignee'];
+                    if (Array.isArray(rawAssignee)) assigneeStr = rawAssignee.join(', ');
+                    else if (rawAssignee) assigneeStr = String(rawAssignee);
+                }
+
                 const fileItem: FileItem = {
                     file: child,
                     mtime: child.stat.mtime,
-                    assignee: frontmatter ? (frontmatter['assignee'] || '未設定') : '未設定'
+                    assignee: assigneeStr
                 };
 
                 let matched = false;
@@ -1022,7 +1030,7 @@ export class FolderDashBacklogView extends ItemView {
             }
         }
 
-        type TaskData = { file: TFile, name: string, status: string, assignee: string, mtime: number, theme: string, epicPath: string, latestUpdate: string, do_today: boolean, epicCategory: string };
+        type TaskData = { file: TFile, name: string, status: string, assignees: string[], mtime: number, theme: string, epicPath: string, latestUpdate: string, do_today: boolean, epicCategory: string };
         const allTasks: TaskData[] = [];
         const uniqueAssignees = new Set<string>();
 
@@ -1034,8 +1042,17 @@ export class FolderDashBacklogView extends ItemView {
                     const fm = cache.frontmatter || {};
                     const title = fm['title'] || abstractFile.parent?.name || '無題のタスク';
                     const status = fm['status'] || 'not-started';
-                    const assignee = fm['assignee'] || '未設定';
-                    uniqueAssignees.add(assignee);
+                    const assigneeRaw = fm['assignee'];
+                    let assignees: string[] = [];
+                    if (Array.isArray(assigneeRaw)) {
+                        assignees = assigneeRaw.filter(a => a).map(a => String(a));
+                    } else if (assigneeRaw) {
+                        assignees = [String(assigneeRaw)];
+                    } else {
+                        assignees = ['未設定'];
+                    }
+                    if (assignees.length === 0) assignees = ['未設定'];
+                    assignees.forEach(a => uniqueAssignees.add(a));
                     const do_today = fm['do_today'] === true;
 
                     const epicInfo = this.getEpicInfoForTask(abstractFile);
@@ -1061,7 +1078,7 @@ export class FolderDashBacklogView extends ItemView {
                     const epicInfoData = epicsMap[theme];
                     const epicCategory = epicInfoData ? epicInfoData.category : 'その他';
 
-                    allTasks.push({ file: abstractFile, name: title, status, assignee, mtime: abstractFile.stat.mtime, theme, epicPath, latestUpdate, do_today, epicCategory });
+                    allTasks.push({ file: abstractFile, name: title, status, assignees, mtime: abstractFile.stat.mtime, theme, epicPath, latestUpdate, do_today, epicCategory });
                 }
             }
         }
@@ -1242,7 +1259,7 @@ latest_update: ""
         };
 
         const tasks = allTasks.filter(task => {
-            if (this.selectedAssignee !== 'All' && task.assignee !== this.selectedAssignee) return false;
+            if (this.selectedAssignee !== 'All' && !task.assignees.includes(this.selectedAssignee)) return false;
             if (this.doTodayFilterEnabled && !task.do_today) return false;
 
             const epicData = epicsMap[task.theme];
@@ -1600,7 +1617,7 @@ latest_update: ""
             this.app.workspace.getLeaf(false).openFile(task.file);
         };
 
-        topRow.createSpan({ text: `👤 担当: ${task.assignee}`, attr: { style: 'font-size: 0.8em; color: var(--text-muted); margin-left: 10px;' } });
+        topRow.createSpan({ text: `👤 担当: ${Array.isArray(task.assignees) ? task.assignees.join(', ') : task.assignee}`, attr: { style: 'font-size: 0.8em; color: var(--text-muted); margin-left: 10px;' } });
 
         if (viewMode === 'agenda') {
             const updateArea = mainContent.createDiv({ attr: { style: 'font-size: 0.85em; color: var(--text-normal); margin-top: 4px; padding-left: 5px; border-left: 2px solid var(--interactive-accent); display: flex; flex-direction: column; gap: 6px;' } });
