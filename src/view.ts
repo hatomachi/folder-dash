@@ -1019,7 +1019,7 @@ latest_update: ""
             }
         }
 
-        type TaskData = { file: TFile, name: string, status: string, assignees: string[], mtime: number, theme: string, epicPath: string, latestUpdate: string, do_today: boolean, epicCategory: string, situation: string, yesterday: string, today: string };
+        type TaskData = { file: TFile, name: string, status: string, assignees: string[], mtime: number, theme: string, epicPath: string, latestUpdate: string, do_today: boolean, epicCategory: string, yesterday: string, today: string };
         const allTasks: TaskData[] = [];
         const uniqueAssignees = new Set<string>();
 
@@ -1070,7 +1070,7 @@ latest_update: ""
                     const epicInfoData = epicsMap[theme];
                     const epicCategory = epicInfoData ? epicInfoData.category : 'その他';
 
-                    allTasks.push({ file: abstractFile, name: title, status, assignees, mtime: abstractFile.stat.mtime, theme, epicPath, latestUpdate, do_today, epicCategory, situation, yesterday, today });
+                    allTasks.push({ file: abstractFile, name: title, status, assignees, mtime: abstractFile.stat.mtime, theme, epicPath, latestUpdate, do_today, epicCategory, yesterday, today });
                 }
             }
         }
@@ -1709,7 +1709,7 @@ latest_update: ""
 
             createTaskCallout(
                 taskCallouts,
-                '💬', '状況説明', 'situation', task.situation,
+                '💬', '状況説明', 'latest_update', task.latestUpdate,
                 '#2d7ad6', 'rgba(45,122,214,0.06)',
                 '【上長向け】進捗の全体感、完了見込み、ブロッカーの有無\n(例) 実装完了しテスト中。他への影響はなく明日リリース予定。'
             );
