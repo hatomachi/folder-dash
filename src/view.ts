@@ -972,7 +972,7 @@ latest_update: ""
 
         const summaryPaths = (this.app.metadataCache as any).getCachedFiles().filter((path: string) => path.endsWith(TASK_MARKER_FILE));
 
-        type EpicData = { name: string, path: string, overview: string, schedule: string, file: TFile, visibility: string, category: string, system: string, rank: number };
+        type EpicData = { name: string, path: string, overview: string, schedule: string, issues: string, file: TFile, visibility: string, category: string, system: string, rank: number };
         const epicsMap: Record<string, EpicData> = {};
         const epicFilePaths = (this.app.metadataCache as any).getCachedFiles().filter((p: string) => p.endsWith(EPIC_MARKER_FILE));
         const uniqueSystems = new Set<string>();
@@ -1009,6 +1009,7 @@ latest_update: ""
                     path: epicFile.parent.path,
                     overview: fm['overview'] || '',
                     schedule: fm['schedule'] || '',
+                    issues: fm['issues'] || '',
                     file: epicFile,
                     visibility, category, system, rank
                 };
@@ -1473,6 +1474,7 @@ latest_update: ""
                     
                     const overviewText = epicData ? epicData.overview : '';
                     const scheduleText = epicData ? epicData.schedule : '';
+                    const issuesText = epicData ? epicData.issues : '';
 
                     if (epicData) {
                         const badgesRow = titleRow.createDiv({ attr: { style: 'display: flex; gap: 4px; align-items: center; cursor: pointer;' } });
@@ -1555,7 +1557,7 @@ latest_update: ""
                         };
                     }
 
-                    if (overviewText || scheduleText) {
+                    if (overviewText || scheduleText || issuesText) {
                         const metaRow = summaryLeft.createDiv({ attr: { style: 'font-size: 0.85em; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px; margin-top: 6px; white-space: pre-wrap; line-height: 1.4;' } });
                         if (overviewText) {
                             const row = metaRow.createDiv();
@@ -1564,6 +1566,10 @@ latest_update: ""
                         if (scheduleText) {
                             const row = metaRow.createDiv();
                             row.innerHTML = `スケジュール: ${scheduleText}`;
+                        }
+                        if (issuesText) {
+                            const row = metaRow.createDiv();
+                            row.innerHTML = `課題: ${issuesText}`;
                         }
                     }
 
@@ -1574,10 +1580,11 @@ latest_update: ""
                         editEpicBtn.onclick = (e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            new EpicEditModal(this.app, overviewText, scheduleText, async (newOverview, newSchedule) => {
+                            new EpicEditModal(this.app, overviewText, scheduleText, issuesText, async (newOverview: string, newSchedule: string, newIssues: string) => {
                                 await this.app.fileManager.processFrontMatter(epicData.file, (fm) => {
                                     fm['overview'] = newOverview;
                                     fm['schedule'] = newSchedule;
+                                    fm['issues'] = newIssues;
                                 });
                                 new Notice(`Epic情報を更新しました`);
                                 this.renderBoard();

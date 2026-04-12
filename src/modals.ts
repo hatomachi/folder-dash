@@ -458,16 +458,19 @@ export class EpicPropertyEditModal extends Modal {
 }
 
 export class EpicEditModal extends Modal {
-    onSubmit: (overview: string, schedule: string) => void;
+    onSubmit: (overview: string, schedule: string, issues: string) => void;
     initialOverview: string;
     initialSchedule: string;
+    initialIssues: string;
     overviewTextarea: HTMLTextAreaElement;
     scheduleTextarea: HTMLTextAreaElement;
+    issuesTextarea: HTMLTextAreaElement;
 
-    constructor(app: App, initialOverview: string, initialSchedule: string, onSubmit: (overview: string, schedule: string) => void) {
+    constructor(app: App, initialOverview: string, initialSchedule: string, initialIssues: string, onSubmit: (overview: string, schedule: string, issues: string) => void) {
         super(app);
         this.initialOverview = initialOverview;
         this.initialSchedule = initialSchedule;
+        this.initialIssues = initialIssues;
         this.onSubmit = onSubmit;
     }
 
@@ -512,13 +515,19 @@ export class EpicEditModal extends Modal {
         }));
         this.scheduleTextarea.value = this.initialSchedule;
 
+        contentEl.createEl('h4', { text: '課題 (issues)', attr: { style: 'margin-bottom: 5px;' } });
+        createToolbar(contentEl, this.issuesTextarea = contentEl.createEl('textarea', {
+            attr: { style: 'width: 100%; height: 80px; margin-bottom: 15px; resize: vertical;' }
+        }));
+        this.issuesTextarea.value = this.initialIssues;
+
         new Setting(contentEl)
             .addButton((btn) =>
                 btn
                     .setButtonText('保存')
                     .setCta()
                     .onClick(() => {
-                        this.onSubmit(this.overviewTextarea.value, this.scheduleTextarea.value);
+                        this.onSubmit(this.overviewTextarea.value, this.scheduleTextarea.value, this.issuesTextarea.value);
                         this.close();
                     })
             )
