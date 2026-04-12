@@ -112,3 +112,9 @@
 .fd-callout-issues .fd-callout-title {
     color: #d73a49;
 }
+
+/* ── 朝会/報告モード切り替え ───────────────────────────────── */
+/* 報告モード ON: standup-item クラスの要素を非表示 */
+.report-mode-active .standup-item {
+    display: none !important;
+}

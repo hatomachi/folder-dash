@@ -873,6 +873,7 @@ export class FolderDashBacklogView extends ItemView {
     isSearchFocused: boolean = false;
     searchCursorStart: number = 0;
     isSearchComposing: boolean = false;
+    isReportMode: boolean = false;
 
     constructor(leaf: WorkspaceLeaf, plugin: FolderDashPlugin) {
         super(leaf);
@@ -1018,7 +1019,7 @@ latest_update: ""
             }
         }
 
-        type TaskData = { file: TFile, name: string, status: string, assignees: string[], mtime: number, theme: string, epicPath: string, latestUpdate: string, do_today: boolean, epicCategory: string };
+        type TaskData = { file: TFile, name: string, status: string, assignees: string[], mtime: number, theme: string, epicPath: string, latestUpdate: string, do_today: boolean, epicCategory: string, situation: string, yesterday: string, today: string };
         const allTasks: TaskData[] = [];
         const uniqueAssignees = new Set<string>();
 
@@ -1063,10 +1064,13 @@ latest_update: ""
                     }
 
                     const latestUpdate = fm['latest_update'] || '';
+                    const situation = fm['situation'] || '';
+                    const yesterday = fm['yesterday'] || '';
+                    const today = fm['today'] || '';
                     const epicInfoData = epicsMap[theme];
                     const epicCategory = epicInfoData ? epicInfoData.category : 'その他';
 
-                    allTasks.push({ file: abstractFile, name: title, status, assignees, mtime: abstractFile.stat.mtime, theme, epicPath, latestUpdate, do_today, epicCategory });
+                    allTasks.push({ file: abstractFile, name: title, status, assignees, mtime: abstractFile.stat.mtime, theme, epicPath, latestUpdate, do_today, epicCategory, situation, yesterday, today });
                 }
             }
         }
@@ -1233,10 +1237,35 @@ latest_update: ""
                 });
             };
 
+            const reportModeBtn = controlsContainer.createEl('button', {
+                text: this.isReportMode ? '☀️ 朝会モード' : '👔 報告モード',
+                attr: { style: this.isReportMode
+                    ? 'background-color: var(--interactive-accent); color: var(--text-on-accent); border: none;'
+                    : 'background-color: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted);' }
+            });
+            reportModeBtn.onclick = () => {
+                this.isReportMode = !this.isReportMode;
+                // CSSクラスでスタンドアップ項目の表示/非表示を制御
+                if (this.isReportMode) {
+                    container.classList.add('report-mode-active');
+                } else {
+                    container.classList.remove('report-mode-active');
+                }
+                reportModeBtn.textContent = this.isReportMode ? '☀️ 朝会モード' : '👔 報告モード';
+                reportModeBtn.setAttribute('style', this.isReportMode
+                    ? 'background-color: var(--interactive-accent); color: var(--text-on-accent); border: none;'
+                    : 'background-color: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted);');
+            };
+
             const systemOrderBtn = controlsContainer.createEl('button', { text: '🔄 システム順を管理', attr: { style: 'background-color: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted);' } });
             systemOrderBtn.onclick = () => {
                 new SystemOrderModal(this.app, this).open();
             };
+        }
+
+        // 初期状態でreportModeがONなら report-mode-active クラスを付与
+        if (this.isReportMode) {
+            container.classList.add('report-mode-active');
         }
 
         const newEpicBtn = controlsContainer.createEl('button', { text: '＋ 新規エピック', cls: 'mod-cta', attr: { style: 'padding: 4px 12px; height: auto;' } });
@@ -1627,25 +1656,56 @@ latest_update: ""
         topRow.createSpan({ text: `👤 担当: ${Array.isArray(task.assignees) ? task.assignees.join(', ') : task.assignee}`, attr: { style: 'font-size: 0.8em; color: var(--text-muted); margin-left: 10px;' } });
 
         if (viewMode === 'agenda') {
-            const updateArea = mainContent.createDiv({ attr: { style: 'font-size: 0.85em; color: var(--text-normal); margin-top: 4px; padding-left: 5px; border-left: 2px solid var(--interactive-accent); display: flex; flex-direction: column; gap: 6px;' } });
+            const taskCallouts = mainContent.createDiv({ cls: 'fd-task-callouts', attr: { style: 'display: flex; flex-direction: column; gap: 8px; margin-top: 8px;' } });
 
-            const contentDiv = updateArea.createDiv({ attr: { style: 'white-space: pre-wrap; line-height: 1.4;' } });
-            if (task.latestUpdate) {
-                // innerHTML renders formatting tags securely in this local app context
-                contentDiv.innerHTML = `💬 ${task.latestUpdate}`;
-            } else {
-                contentDiv.innerHTML = `💬 <span style="color: var(--text-muted); font-style: italic;">(最新状況が未入力です)</span>`;
-            }
-
-            const editBtn = updateArea.createEl('button', { text: '📝 編集', attr: { style: 'align-self: flex-start; font-size: 0.75em; padding: 2px 8px; height: auto; background-color: transparent; border: 1px solid var(--background-modifier-border); box-shadow: none;' } });
-            editBtn.onclick = () => {
-                new LatestUpdateModal(this.app, task.latestUpdate || '', async (newText) => {
+            // ── ヘルパー: 編集可能コールアウトブロックの生成 ──
+            const createTaskCallout = (
+                parent: HTMLElement,
+                icon: string,
+                label: string,
+                fmKey: string,
+                currentValue: string,
+                borderColor: string,
+                bgColor: string,
+                placeholder: string,
+                extraCls?: string
+            ) => {
+                const block = parent.createDiv({ cls: `fd-task-callout${extraCls ? ' ' + extraCls : ''}`, attr: { style: `border-left: 4px solid ${borderColor}; background: ${bgColor}; border-radius: 6px; padding: 8px 12px;` } });
+                block.createDiv({ cls: 'fd-task-callout-title', attr: { style: `font-weight: bold; font-size: 0.9em; color: ${borderColor}; margin-bottom: 4px;` }, text: `${icon} ${label}` });
+                const ta = block.createEl('textarea', {
+                    attr: {
+                        placeholder,
+                        style: 'width: 100%; min-height: 52px; resize: vertical; font-family: inherit; font-size: 0.9em; line-height: 1.6; padding: 5px 7px; border-radius: 4px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); color: var(--text-normal); box-sizing: border-box;'
+                    }
+                });
+                ta.value = currentValue;
+                ta.addEventListener('change', async () => {
                     await this.app.fileManager.processFrontMatter(task.file, (fm) => {
-                        fm['latest_update'] = newText;
+                        fm[fmKey] = ta.value;
                     });
-                    this.renderBoard();
-                }).open();
+                });
             };
+
+            createTaskCallout(
+                taskCallouts,
+                '💬', '状況説明', 'situation', task.situation,
+                '#2d7ad6', 'rgba(45,122,214,0.06)',
+                '【上長向け】進捗の全体感、完了見込み、ブロッカーの有無\n(例) 実装完了しテスト中。他への影響はなく明日リリース予定。'
+            );
+            createTaskCallout(
+                taskCallouts,
+                '🔄', '昨日の振り返り', 'yesterday', task.yesterday,
+                '#6f42c1', 'rgba(111,66,193,0.06)',
+                '【自省用】昨日の計画に対する結果、気づき・反省\n(例) 〇〇の実装で想定より1時間超過。事前の仕様確認が甘かった。',
+                'standup-item'
+            );
+            createTaskCallout(
+                taskCallouts,
+                '🎯', '本日やること', 'today', task.today,
+                '#e36209', 'rgba(227,98,9,0.06)',
+                '【朝会用】今日終わらせる具体的なアクション\n(例) 残りのテストを消化し、15時までにPRを作成してレビュー依頼する。',
+                'standup-item'
+            );
         }
 
         const actionsDiv = card.createDiv({ attr: { style: 'display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: flex-end; min-width: max-content;' } });
