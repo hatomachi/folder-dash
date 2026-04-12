@@ -80,11 +80,39 @@ npm run build
 
 ## Testing
 
+### Manual testing
+
 - Manual install for testing: copy `main.js`, `manifest.json`, `styles.css` (if any) to:
   ```
   <Vault>/.obsidian/plugins/<plugin-id>/
   ```
 - Reload Obsidian and enable the plugin in **Settings → Community plugins**.
+
+### Automated testing (Vitest)
+
+- **Framework**: Vitest (configured in `package.json`).
+- **Run all tests**: `npm test`
+- **Run tests in watch mode**: `npm run test:watch`
+- **Test file naming**: Place test files next to the module they test, using the `.test.ts` suffix.
+  - Example: `src/utils/searchFilter.ts` → `src/utils/searchFilter.test.ts`
+- **What to test**: Pure functions and logic modules in `src/utils/`. UI classes (`View`, `Modal`) that depend on Obsidian APIs are NOT tested directly.
+
+## Refactoring & Sprout Method (Working Effectively with Legacy Code)
+
+When adding new features or modifying complex logic, **DO NOT** add raw logic directly into UI classes (like `View` or `Modal` classes in `view.ts`). Instead, strictly follow the "Sprout Method":
+
+1. **Extract Pure Functions**: Write the new logic as a pure function (independent of Obsidian's `App`, `TFile`, or DOM APIs).
+2. **Place in Utils**: Place these pure functions in the `src/utils/` directory.
+3. **Write Tests First/Alongside**: ALWAYS write a unit test for this pure function using **Vitest**. Place the test file next to the implementation (e.g., `src/utils/taskFilter.ts` → `src/utils/taskFilter.test.ts`).
+4. **Integrate**: Call this tested pure function from the UI layer (`view.ts` or `modals.ts`).
+
+**Example Flow for AI:**
+If the user asks: "Add a feature to filter tasks by priority."
+- DON'T: Add the filtering `if` statements directly inside `FolderDashBacklogView.renderBoard()`.
+- DO:
+  1. Create `src/utils/filterLogic.ts` with an exported pure function `filterByPriority(tasks, priority)`.
+  2. Create `src/utils/filterLogic.test.ts` to verify the logic.
+  3. Import and use `filterByPriority` inside `renderBoard()`.
 
 ## Commands & settings
 

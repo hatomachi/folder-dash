@@ -1,6 +1,7 @@
 import { ItemView, WorkspaceLeaf, TFolder, TFile, Notice, Modal, Setting, App, normalizePath } from 'obsidian';
 import FolderDashPlugin from './main';
 import { ReasonInputModal, FileNameInputModal, LatestUpdateModal, EpicCreateModal, TaskCreateModal, EpicPropertyEditModal, EpicEditModal } from './modals';
+import { parseSearchKeywords, matchesAllKeywords } from './utils/searchFilter';
 
 export { ReasonInputModal, FileNameInputModal, LatestUpdateModal, EpicCreateModal, TaskCreateModal, EpicPropertyEditModal, EpicEditModal };
 
@@ -1242,7 +1243,7 @@ latest_update: ""
             new EpicCreateModal(this.app, systemsArray, this.plugin.settings.visibilitySettings, this.plugin.settings.epicCategories, this.handleEpicCreate.bind(this)).open();
         };
 
-        const keywords = this.searchQuery.toLowerCase().split(/[\s　]+/).filter(k => k.length > 0);
+        const keywords = parseSearchKeywords(this.searchQuery);
 
         const tasks = allTasks.filter(task => {
             if (this.selectedAssignee !== 'All' && !task.assignees.includes(this.selectedAssignee)) return false;
@@ -1259,11 +1260,8 @@ latest_update: ""
             if (epicData && this.hiddenSystems.has(epicData.system)) return false;
             if (this.selectedVisibility !== 'All' && (!epicData || epicData.visibility !== this.selectedVisibility)) return false;
 
-            if (keywords.length > 0) {
-                const taskPath = task.file.path.toLowerCase();
-                if (!keywords.every(kw => taskPath.includes(kw))) {
-                    return false;
-                }
+            if (keywords.length > 0 && !matchesAllKeywords(task.file.path, keywords)) {
+                return false;
             }
 
             return true;
@@ -1276,8 +1274,7 @@ latest_update: ""
             } else if (this.selectedVisibility !== 'All' && epicData.visibility !== this.selectedVisibility) {
                 delete epicsMap[themeName];
             } else if (keywords.length > 0) {
-                const epicPath = epicData.file.path.toLowerCase();
-                const epicMatches = keywords.every(kw => epicPath.includes(kw));
+                const epicMatches = matchesAllKeywords(epicData.file.path, keywords);
                 const hasMatchingTasks = tasks.some(t => t.theme === themeName);
                 if (!epicMatches && !hasMatchingTasks) {
                     delete epicsMap[themeName];
