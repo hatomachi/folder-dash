@@ -1482,18 +1482,24 @@ latest_update: ""
                     }
 
                     if (overviewText || scheduleText || issuesText) {
-                        const metaRow = summaryLeft.createDiv({ attr: { style: 'font-size: 0.85em; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px; margin-top: 6px; white-space: pre-wrap; line-height: 1.4;' } });
+                        const calloutContainer = summaryLeft.createDiv({ cls: 'fd-epic-callouts', attr: { style: 'display: flex; flex-direction: column; gap: 10px; margin-top: 10px;' } });
                         if (overviewText) {
-                            const row = metaRow.createDiv();
-                            row.innerHTML = `概況: ${overviewText}`;
+                            const block = calloutContainer.createDiv({ cls: 'fd-callout fd-callout-overview' });
+                            block.createDiv({ cls: 'fd-callout-title', text: 'ℹ️ 概況' });
+                            const body = block.createDiv({ cls: 'fd-callout-body' });
+                            body.innerHTML = overviewText;
                         }
                         if (scheduleText) {
-                            const row = metaRow.createDiv();
-                            row.innerHTML = `スケジュール: ${scheduleText}`;
+                            const block = calloutContainer.createDiv({ cls: 'fd-callout fd-callout-schedule' });
+                            block.createDiv({ cls: 'fd-callout-title', text: '📅 スケジュール' });
+                            const body = block.createDiv({ cls: 'fd-callout-body' });
+                            body.innerHTML = scheduleText;
                         }
                         if (issuesText) {
-                            const row = metaRow.createDiv();
-                            row.innerHTML = `課題: ${issuesText}`;
+                            const block = calloutContainer.createDiv({ cls: 'fd-callout fd-callout-issues' });
+                            block.createDiv({ cls: 'fd-callout-title', text: '⚠️ 課題' });
+                            const body = block.createDiv({ cls: 'fd-callout-body' });
+                            body.innerHTML = issuesText;
                         }
                     }
 

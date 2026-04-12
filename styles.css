@@ -61,3 +61,54 @@
     color: var(--nav-item-color-active);
     font-weight: bold;
 }
+
+/* ── Agenda View: レポートカード形式コールアウト ───────────────── */
+.fd-callout {
+    border-radius: 6px;
+    padding: 10px 14px;
+    border-left: 4px solid #888;
+    background: rgba(128, 128, 128, 0.05);
+    box-sizing: border-box;
+}
+
+.fd-callout-title {
+    font-weight: bold;
+    font-size: 1.0em;
+    margin-bottom: 6px;
+    letter-spacing: 0.01em;
+}
+
+.fd-callout-body {
+    font-size: 1.0em;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-normal);
+}
+
+/* 概況 ── 青系 */
+.fd-callout-overview {
+    border-left-color: #2d7ad6;
+    background: rgba(45, 122, 214, 0.06);
+}
+.fd-callout-overview .fd-callout-title {
+    color: #2d7ad6;
+}
+
+/* スケジュール ── 緑系 */
+.fd-callout-schedule {
+    border-left-color: #28a745;
+    background: rgba(40, 167, 69, 0.06);
+}
+.fd-callout-schedule .fd-callout-title {
+    color: #28a745;
+}
+
+/* 課題 ── 赤・オレンジ系 */
+.fd-callout-issues {
+    border-left-color: #d73a49;
+    background: rgba(215, 58, 73, 0.06);
+}
+.fd-callout-issues .fd-callout-title {
+    color: #d73a49;
+}
