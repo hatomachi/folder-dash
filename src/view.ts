@@ -833,6 +833,15 @@ export class FolderDashView extends ItemView {
             await this.renderEpicDashboard(container, parentFolder, epicFile);
             return;
         }
+
+        // Check for _system.md → System Dashboard
+        const systemFilePath = normalizePath(`${parentFolder.path}/_system.md`);
+        const systemFile = this.app.vault.getAbstractFileByPath(systemFilePath);
+        if (systemFile instanceof TFile) {
+            await this.renderSystemDashboard(container, parentFolder, systemFile);
+            return;
+        }
+
         container.createEl('h2', { text: `${parentFolder.name}`, attr: { style: 'margin-bottom: 20px;' } });
 
         const summaryFilePath = normalizePath(`${parentFolder.path}/${TASK_MARKER_FILE}`);
@@ -1078,7 +1087,115 @@ theme: "${relPathToEpic}"
         await this.renderNoteList(container, parentFolder);
     }
 
-    private async renderNoteList(container: HTMLElement, parentFolder: TFolder) {
+    private async renderSystemDashboard(container: HTMLElement, parentFolder: TFolder, systemFile: TFile) {
+        const cache = this.app.metadataCache.getFileCache(systemFile);
+        const fm = cache?.frontmatter || {};
+        const systemName = parentFolder.name;
+
+        // Detect visibility from path
+        const visSettings = this.plugin.settings.visibilitySettings;
+        let currentVisibility = '';
+        for (const vis of visSettings) {
+            if (parentFolder.path.startsWith(vis.folder)) {
+                currentVisibility = vis.name;
+                break;
+            }
+        }
+
+        // Detect category from path
+        const epicCats = this.plugin.settings.epicCategories || [];
+        let currentCategory = '';
+        for (const cat of epicCats) {
+            if (parentFolder.path.includes(cat.id)) {
+                currentCategory = cat.id;
+                break;
+            }
+        }
+
+        // Header
+        const headerContainer = container.createDiv({ attr: { style: 'display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;' } });
+        headerContainer.createEl('h2', { text: `💻 ${systemName}`, attr: { style: 'margin: 0; font-size: 1.4em;' } });
+
+        // Badges
+        const badgesRow = container.createDiv({ attr: { style: 'display: flex; gap: 6px; margin-bottom: 20px; align-items: center; flex-wrap: wrap;' } });
+        const createBadge = (text: string, color: string) => {
+            badgesRow.createSpan({ text, attr: { style: `font-size: 0.8em; padding: 3px 8px; border-radius: 4px; background: ${color}; color: var(--text-normal); border: 1px solid var(--background-modifier-border); font-weight: bold;` } });
+        };
+        if (currentVisibility) createBadge(currentVisibility, 'var(--background-secondary-alt)');
+        if (currentCategory) createBadge(currentCategory, 'var(--background-secondary-alt)');
+        createBadge(`rank: ${fm['rank'] ?? '未設定'}`, 'var(--interactive-accent-hover)');
+
+        // System properties section
+        const propsDiv = container.createDiv({ cls: 'folder-dash-header', attr: { style: 'background: var(--background-secondary); padding: 15px; border-radius: 8px; margin-bottom: 20px;' } });
+        propsDiv.createEl('h3', { text: '⚙️ システムプロパティ', attr: { style: 'margin: 0 0 10px 0; font-size: 1.1em;' } });
+
+        const grid = propsDiv.createDiv({ attr: { style: 'display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.9em;' } });
+        const createStat = (label: string, val: string) => {
+            const d = grid.createDiv();
+            d.createSpan({ text: label + ': ', attr: { style: 'color: var(--text-muted);' } });
+            d.createSpan({ text: val, attr: { style: 'font-weight: bold;' } });
+        };
+        createStat('パス', parentFolder.path);
+        createStat('Rank', String(fm['rank'] ?? '未設定'));
+        if (currentVisibility) createStat('公開範囲', currentVisibility);
+        if (currentCategory) createStat('カテゴリ', currentCategory);
+
+        // Related Epics section
+        const epicsDiv = container.createDiv({ attr: { style: 'margin-bottom: 20px;' } });
+        const epicsSectionHeader = epicsDiv.createDiv({ attr: { style: 'display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 5px; margin-bottom: 8px;' } });
+        epicsSectionHeader.createEl('h3', { text: '📁 エピック一覧', attr: { style: 'margin: 0; font-size: 1.1em;' } });
+
+        const epicChildren: { name: string, path: string, file: TFile, fm: any }[] = [];
+        for (const child of parentFolder.children) {
+            if (child instanceof TFolder) {
+                const epicPath = normalizePath(`${child.path}/${EPIC_MARKER_FILE}`);
+                const ef = this.app.vault.getAbstractFileByPath(epicPath);
+                if (ef instanceof TFile) {
+                    const ecache = this.app.metadataCache.getFileCache(ef);
+                    epicChildren.push({ name: child.name, path: child.path, file: ef, fm: ecache?.frontmatter || {} });
+                }
+            }
+        }
+
+        // Sort epics by rank
+        epicChildren.sort((a, b) => {
+            const rankA = typeof a.fm.rank === 'number' ? a.fm.rank : 999;
+            const rankB = typeof b.fm.rank === 'number' ? b.fm.rank : 999;
+            if (rankA !== rankB) return rankA - rankB;
+            return a.name.localeCompare(b.name);
+        });
+
+        if (epicChildren.length > 0) {
+            const ul = epicsDiv.createEl('ul', { attr: { style: 'list-style-type: none; padding-left: 0; margin-top: 5px;' } });
+            for (const epic of epicChildren) {
+                const li = ul.createEl('li', { attr: { style: 'margin-bottom: 6px; display: flex; align-items: center; gap: 8px;' } });
+
+                const statusIcon = epic.fm.status === '完了' || epic.fm.status === 'completed' ? '✅' : '📁';
+                const link = li.createEl('a', { text: `${statusIcon} ${epic.name}`, cls: 'internal-link', attr: { style: 'font-weight: 600; cursor: pointer;' } });
+                link.onclick = (e) => {
+                    e.preventDefault();
+                    this.app.workspace.getLeaf(false).openFile(epic.file);
+                };
+
+                if (epic.fm.rank !== undefined) {
+                    li.createSpan({ text: `rank: ${epic.fm.rank}`, attr: { style: 'font-size: 0.75em; padding: 2px 6px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted);' } });
+                }
+
+                const overview = epic.fm.overview || '';
+                if (overview) {
+                    const overviewSpan = li.createSpan({ attr: { style: 'font-size: 0.8em; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px;' } });
+                    overviewSpan.textContent = overview;
+                }
+            }
+        } else {
+            epicsDiv.createEl('p', { text: 'このシステムにエピックはありません。', attr: { style: 'color: var(--text-muted); font-size: 0.9em;' } });
+        }
+
+        // Notes section - find all notes directly in this system folder
+        await this.renderNoteList(container, parentFolder, '_system.md');
+    }
+
+    private async renderNoteList(container: HTMLElement, parentFolder: TFolder, extraExclude?: string) {
         const categoryGroups: Record<string, FileItem[]> = {};
         this.plugin.settings.noteCategories.forEach(cat => {
             categoryGroups[cat.id] = [];
@@ -1086,7 +1203,7 @@ theme: "${relPathToEpic}"
         const others: FileItem[] = [];
 
         for (const child of parentFolder.children) {
-            if (child instanceof TFile && child.extension === 'md' && child.name !== TASK_MARKER_FILE && child.name !== EPIC_MARKER_FILE) {
+            if (child instanceof TFile && child.extension === 'md' && child.name !== TASK_MARKER_FILE && child.name !== EPIC_MARKER_FILE && (!extraExclude || child.name !== extraExclude)) {
                 const cache = this.app.metadataCache.getFileCache(child);
                 const frontmatter = cache?.frontmatter;
 
