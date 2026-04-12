@@ -1476,85 +1476,9 @@ latest_update: ""
                     const scheduleText = epicData ? epicData.schedule : '';
                     const issuesText = epicData ? epicData.issues : '';
 
-                    if (epicData) {
-                        const badgesRow = titleRow.createDiv({ attr: { style: 'display: flex; gap: 4px; align-items: center; cursor: pointer;' } });
-                        badgesRow.title = "クリックして属性とフォルダパスを編集";
-
-                        const createBadge = (text: string, color: string) => {
-                            badgesRow.createSpan({ text, attr: { style: `font-size: 0.7em; padding: 2px 6px; border-radius: 4px; background: ${color}; color: var(--text-normal); border: 1px solid var(--background-modifier-border);` } });
-                        };
-                        createBadge(epicData.visibility, 'var(--background-secondary-alt)');
-                        createBadge(epicData.category, 'var(--background-secondary-alt)');
-                        createBadge(epicData.system, 'var(--interactive-accent-hover)');
-
-                        badgesRow.onclick = (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            // Find unique systems available from epicsMap
-                            const existingSystems = Array.from(new Set(Object.values(epicsMap)
-                                .map((e: any) => e.system)
-                                .filter(s => s && s !== '未分類')
-                            ));
-
-                            new EpicPropertyEditModal(this.app, epicData.visibility, epicData.category, epicData.system, existingSystems as string[], this.plugin.settings.visibilitySettings, this.plugin.settings.epicCategories, async (newVis: string, newCat: string, newSys: string) => {
-                                let didChange = false;
-                                let didMove = false;
-
-                                // Check path changes and move directory
-                                const visConf = this.plugin.settings.visibilitySettings.find(v => v.name === newVis);
-                                const baseFolder = visConf ? visConf.folder : 'shared';
-                                const newFolderPath = normalizePath(`${baseFolder}/${newCat}/${newSys}/${epicData.name}`);
-
-                                if (epicData.path !== newFolderPath) {
-                                    try {
-                                        // Create intermediate folders if they don't exist
-                                        const parts = newFolderPath.split('/').slice(0, -1);
-                                        let currentPath = '';
-                                        for (const part of parts) {
-                                            if (!part) continue;
-                                            currentPath = currentPath ? `${currentPath}/${part}` : part;
-                                            const existing = this.app.vault.getAbstractFileByPath(currentPath);
-                                            if (!existing) {
-                                                await this.app.vault.createFolder(currentPath);
-                                            }
-                                        }
-
-                                        await this.app.fileManager.renameFile(epicData.file.parent!, newFolderPath);
-                                        didChange = true;
-                                        didMove = true;
-                                        new Notice(`Epicを移動しました: ${newFolderPath}`);
-                                    } catch (error) {
-                                        console.error("Folder rename failed:", error);
-                                        new Notice(`フォルダの移動に失敗しました`);
-                                        return; // early return to prevent data desync
-                                    }
-                                }
-
-                                // Update frontmatter values if necessary
-                                if (epicData.visibility !== newVis || epicData.category !== newCat || epicData.system !== newSys) {
-                                    // Important: if folder moved, we must re-resolve the Epic marker file path, as epicData.file belongs to the old abstraction layer!
-                                    let targetFile = epicData.file;
-                                    if (didMove) {
-                                        const newEpicFilePath = normalizePath(`${newFolderPath}/${EPIC_MARKER_FILE}`);
-                                        const newlyMovedFile = this.app.vault.getAbstractFileByPath(newEpicFilePath);
-                                        if (newlyMovedFile instanceof TFile) {
-                                            targetFile = newlyMovedFile;
-                                        }
-                                    }
-
-                                    await this.app.fileManager.processFrontMatter(targetFile, (fm) => {
-                                        fm['visibility'] = newVis;
-                                        fm['category'] = newCat;
-                                        fm['system'] = newSys;
-                                    });
-                                    didChange = true;
-                                }
-
-                                if (didChange) {
-                                    setTimeout(() => this.renderBoard(), 200); // small timeout enables fileCache tracking update
-                                }
-                            }).open();
-                        };
+                    if (epicData && epicData.visibility) {
+                        const badgesRow = titleRow.createDiv({ attr: { style: 'display: flex; gap: 4px; align-items: center;' } });
+                        badgesRow.createSpan({ text: epicData.visibility, attr: { style: 'font-size: 0.7em; padding: 2px 6px; border-radius: 4px; background: var(--background-secondary-alt); color: var(--text-normal); border: 1px solid var(--background-modifier-border);' } });
                     }
 
                     if (overviewText || scheduleText || issuesText) {
@@ -1573,24 +1497,7 @@ latest_update: ""
                         }
                     }
 
-                    const summaryRight = themeSummary.createDiv({ attr: { style: 'display: flex; gap: 10px; align-items: center;' } });
 
-                    if (epicData) {
-                        const editEpicBtn = summaryRight.createEl('button', { text: '📝 Epic情報編集', attr: { style: 'font-size: 0.8em; padding: 4px 10px; height: auto; background-color: transparent; border: 1px solid var(--background-modifier-border); box-shadow: none;' } });
-                        editEpicBtn.onclick = (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            new EpicEditModal(this.app, overviewText, scheduleText, issuesText, async (newOverview: string, newSchedule: string, newIssues: string) => {
-                                await this.app.fileManager.processFrontMatter(epicData.file, (fm) => {
-                                    fm['overview'] = newOverview;
-                                    fm['schedule'] = newSchedule;
-                                    fm['issues'] = newIssues;
-                                });
-                                new Notice(`Epic情報を更新しました`);
-                                this.renderBoard();
-                            }).open();
-                        };
-                    }
 
                     const themeTasks = grouped[theme];
 
@@ -1599,35 +1506,6 @@ latest_update: ""
                         const validTask = themeTasks.find(t => t.epicPath && t.epicPath !== '/');
                         parentPath = validTask ? validTask.epicPath : (themeTasks[0].epicPath || '/');
                     }
-
-                    const addTaskBtn = summaryRight.createEl('button', { text: '＋ タスク追加', attr: { style: 'font-size: 0.8em; padding: 4px 10px; height: auto; background-color: transparent; border: 1px solid var(--background-modifier-border); box-shadow: none;' } });
-                    addTaskBtn.onclick = (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        new TaskCreateModal(this.app, parentPath, async (taskName: string) => {
-                            const taskFolderPath = parentPath === '/' ? normalizePath(taskName) : normalizePath(`${parentPath}/${taskName}`);
-                            try {
-                                await this.app.vault.createFolder(taskFolderPath);
-                                const taskFilePath = normalizePath(`${taskFolderPath}/${TASK_MARKER_FILE}`);
-                                const now = new Date().toISOString();
-                                const defaultStatus = this.plugin.settings.defaultStatus || '未着手';
-                                const content = `---
-title: "${taskName}"
-status: "${defaultStatus}"
-assignee: "未設定"
-created_at: "${now}"
-latest_update: ""
----
-`;
-                                await this.app.vault.create(taskFilePath, content);
-                                new Notice(`タスク「${taskName}」を作成しました`);
-                                this.renderBoard();
-                            } catch (e: any) {
-                                console.error(e);
-                                new Notice(`作成失敗: 同名のフォルダが既に存在する可能性があります`);
-                            }
-                        }).open();
-                    };
 
                     const tasksDiv = themeDetails.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 10px; margin-top: 10px;' } });
 
@@ -1638,6 +1516,31 @@ latest_update: ""
                             this.renderTaskCard(tasksDiv, task, 'agenda');
                         }
                     }
+
+                    // Add task button at the bottom of the task list
+                    const addTaskBtn = tasksDiv.createEl('button', { text: '＋ タスクを追加', attr: { style: 'background: transparent; border: 1px dashed var(--background-modifier-border); color: var(--text-muted); font-size: 0.85em; padding: 8px 12px; border-radius: 6px; cursor: pointer; width: 100%; text-align: center; opacity: 0.8; transition: opacity 0.15s ease;' } });
+                    addTaskBtn.onmouseenter = () => { addTaskBtn.style.opacity = '1'; addTaskBtn.style.borderColor = 'var(--interactive-accent)'; addTaskBtn.style.color = 'var(--interactive-accent)'; };
+                    addTaskBtn.onmouseleave = () => { addTaskBtn.style.opacity = '0.8'; addTaskBtn.style.borderColor = 'var(--background-modifier-border)'; addTaskBtn.style.color = 'var(--text-muted)'; };
+                    addTaskBtn.onclick = (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        new TaskCreateModal(this.app, parentPath, async (taskName: string) => {
+                            const taskFolderPath = parentPath === '/' ? normalizePath(taskName) : normalizePath(`${parentPath}/${taskName}`);
+                            try {
+                                await this.app.vault.createFolder(taskFolderPath);
+                                const taskFilePath = normalizePath(`${taskFolderPath}/${TASK_MARKER_FILE}`);
+                                const now = new Date().toISOString();
+                                const defaultStatus = this.plugin.settings.defaultStatus || '未着手';
+                                const content = `---\ntitle: "${taskName}"\nstatus: "${defaultStatus}"\nassignee: "未設定"\ncreated_at: "${now}"\nlatest_update: ""\n---\n`;
+                                await this.app.vault.create(taskFilePath, content);
+                                new Notice(`タスク「${taskName}」を作成しました`);
+                                this.renderBoard();
+                            } catch (e: any) {
+                                console.error(e);
+                                new Notice(`作成失敗: 同名のフォルダが既に存在する可能性があります`);
+                            }
+                        }).open();
+                    };
                 }
 
                 const inlineAddContainer = sectionDiv.createDiv({ attr: { style: 'margin-top: 5px; margin-bottom: 20px; padding-left: 10px;' } });
