@@ -464,6 +464,217 @@ export class EpicPropertyEditModal extends Modal {
     }
 }
 
+export class SystemOrderModal extends Modal {
+    view: FolderDashBacklogView;
+
+    constructor(app: App, view: FolderDashBacklogView) {
+        super(app);
+        this.view = view;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('h2', { text: '🔄 システム順を管理' });
+        contentEl.createEl('p', { text: 'rank を変更すると、カテゴリ・公開範囲を問わず該当システムの全 _system.md を一括更新します。', attr: { style: 'color: var(--text-muted); font-size: 0.85em; margin-top: -10px; margin-bottom: 20px;' } });
+
+        // Collect all _system.md files
+        const systemFilePaths = (this.app.metadataCache as any).getCachedFiles().filter((p: string) => p.endsWith('_system.md'));
+
+        // Group by system name, pick representative rank
+        const systemMap: Record<string, { rank: number, files: TFile[] }> = {};
+        for (const sysFilePath of systemFilePaths) {
+            const sysFile = this.app.vault.getAbstractFileByPath(sysFilePath);
+            if (sysFile instanceof TFile && sysFile.parent) {
+                const systemName = sysFile.parent.name;
+                const cache = this.app.metadataCache.getFileCache(sysFile);
+                const r = cache?.frontmatter?.rank;
+                const rank = typeof r === 'number' ? r : 999;
+
+                if (!systemMap[systemName]) {
+                    systemMap[systemName] = { rank, files: [] };
+                }
+                systemMap[systemName].files.push(sysFile);
+
+                // Prefer rank from 維持管理 category file as representative
+                if (sysFilePath.includes('維持管理')) {
+                    systemMap[systemName].rank = rank;
+                }
+            }
+        }
+
+        // Sort by rank for display
+        const sortedSystems = Object.entries(systemMap).sort((a, b) => {
+            if (a[1].rank !== b[1].rank) return a[1].rank - b[1].rank;
+            return a[0].localeCompare(b[0]);
+        });
+
+        if (sortedSystems.length === 0) {
+            contentEl.createEl('p', { text: 'システムが見つかりません。', attr: { style: 'color: var(--text-muted);' } });
+            return;
+        }
+
+        const editedRanks: Record<string, number> = {};
+
+        const listContainer = contentEl.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; max-height: 400px; overflow-y: auto;' } });
+
+        for (const [systemName, data] of sortedSystems) {
+            editedRanks[systemName] = data.rank;
+
+            const row = listContainer.createDiv({ attr: { style: 'display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 4px; background: var(--background-secondary);' } });
+            row.createSpan({ text: `💻 ${systemName}`, attr: { style: 'flex: 1; font-weight: 600;' } });
+            row.createSpan({ text: `(${data.files.length}件)`, attr: { style: 'color: var(--text-muted); font-size: 0.8em; margin-right: 8px;' } });
+
+            const input = row.createEl('input', { type: 'number', attr: { value: String(data.rank), style: 'width: 70px; padding: 4px 6px; border-radius: 4px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-normal); text-align: center;' } });
+            input.addEventListener('change', () => {
+                editedRanks[systemName] = parseInt(input.value) || 999;
+            });
+        }
+
+        new Setting(contentEl)
+            .addButton((btn) =>
+                btn
+                    .setButtonText('保存')
+                    .setCta()
+                    .onClick(async () => {
+                        const promises: Promise<void>[] = [];
+
+                        for (const [systemName, data] of sortedSystems) {
+                            const newRank = editedRanks[systemName];
+                            if (newRank !== data.rank) {
+                                // Update ALL _system.md files for this system name
+                                for (const file of data.files) {
+                                    promises.push(
+                                        this.app.fileManager.processFrontMatter(file, (fm) => {
+                                            fm['rank'] = newRank;
+                                        })
+                                    );
+                                }
+                            }
+                        }
+
+                        if (promises.length > 0) {
+                            await Promise.all(promises);
+                            new Notice(`${promises.length} 件の _system.md を更新しました`);
+                        }
+
+                        this.close();
+                        this.view.renderBoard();
+                    })
+            )
+            .addButton((btn) =>
+                btn
+                    .setButtonText('キャンセル')
+                    .onClick(() => {
+                        this.close();
+                    })
+            );
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
+}
+
+export class EpicOrderModal extends Modal {
+    view: FolderDashBacklogView;
+    filterCategory: string;
+    systemName: string;
+    epicsMap: Record<string, any>;
+
+    constructor(app: App, view: FolderDashBacklogView, filterCategory: string, systemName: string, epicsMap: Record<string, any>) {
+        super(app);
+        this.view = view;
+        this.filterCategory = filterCategory;
+        this.systemName = systemName;
+        this.epicsMap = epicsMap;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('h2', { text: `↕️ エピック順を管理 — ${this.systemName}` });
+        contentEl.createEl('p', { text: `「${this.systemName}」内のエピックの並び順 (rank) を変更します。`, attr: { style: 'color: var(--text-muted); font-size: 0.85em; margin-top: -10px; margin-bottom: 20px;' } });
+
+        // Get epics that belong to this system
+        const systemEpics = Object.values(this.epicsMap).filter((e: any) => e.system === this.systemName);
+
+        // Sort by current rank
+        systemEpics.sort((a: any, b: any) => {
+            const rankA = a.rank ?? 999;
+            const rankB = b.rank ?? 999;
+            if (rankA !== rankB) return rankA - rankB;
+            return a.name.localeCompare(b.name);
+        });
+
+        if (systemEpics.length === 0) {
+            contentEl.createEl('p', { text: 'このシステムにはエピックがありません。', attr: { style: 'color: var(--text-muted);' } });
+            return;
+        }
+
+        const editedRanks: Record<string, number> = {};
+
+        const listContainer = contentEl.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; max-height: 400px; overflow-y: auto;' } });
+
+        for (const epic of systemEpics) {
+            const epicData = epic as any;
+            editedRanks[epicData.path] = epicData.rank ?? 999;
+
+            const row = listContainer.createDiv({ attr: { style: 'display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 4px; background: var(--background-secondary);' } });
+            row.createSpan({ text: `📁 ${epicData.name}`, attr: { style: 'flex: 1; font-weight: 600;' } });
+
+            const badge = row.createSpan({ text: epicData.category, attr: { style: 'font-size: 0.7em; padding: 2px 6px; border-radius: 4px; background: var(--background-secondary-alt); border: 1px solid var(--background-modifier-border); margin-right: 8px;' } });
+
+            const input = row.createEl('input', { type: 'number', attr: { value: String(epicData.rank ?? 999), style: 'width: 70px; padding: 4px 6px; border-radius: 4px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-normal); text-align: center;' } });
+            input.addEventListener('change', () => {
+                editedRanks[epicData.path] = parseInt(input.value) || 999;
+            });
+        }
+
+        new Setting(contentEl)
+            .addButton((btn) =>
+                btn
+                    .setButtonText('保存')
+                    .setCta()
+                    .onClick(async () => {
+                        const promises: Promise<void>[] = [];
+
+                        for (const epic of systemEpics) {
+                            const epicData = epic as any;
+                            const newRank = editedRanks[epicData.path];
+                            const oldRank = epicData.rank ?? 999;
+                            if (newRank !== oldRank) {
+                                promises.push(
+                                    this.app.fileManager.processFrontMatter(epicData.file, (fm: any) => {
+                                        fm['rank'] = newRank;
+                                    })
+                                );
+                            }
+                        }
+
+                        if (promises.length > 0) {
+                            await Promise.all(promises);
+                            new Notice(`${promises.length} 件のエピックの rank を更新しました`);
+                        }
+
+                        this.close();
+                        this.view.renderBoard();
+                    })
+            )
+            .addButton((btn) =>
+                btn
+                    .setButtonText('キャンセル')
+                    .onClick(() => {
+                        this.close();
+                    })
+            );
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
+}
+
 class EpicEditModal extends Modal {
     onSubmit: (overview: string, schedule: string) => void;
     initialOverview: string;
@@ -1434,6 +1645,11 @@ latest_update: ""
                     }
                 });
             };
+
+            const systemOrderBtn = controlsContainer.createEl('button', { text: '🔄 システム順を管理', attr: { style: 'background-color: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted);' } });
+            systemOrderBtn.onclick = () => {
+                new SystemOrderModal(this.app, this).open();
+            };
         }
 
         const newEpicBtn = controlsContainer.createEl('button', { text: '＋ 新規エピック', cls: 'mod-cta', attr: { style: 'padding: 4px 12px; height: auto;' } });
@@ -1606,7 +1822,16 @@ latest_update: ""
                 const sysHeaderContainer = sectionDiv.createDiv({ attr: { style: 'display: flex; justify-content: space-between; align-items: center; margin-top: 15px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px dashed var(--background-modifier-border);' } });
                 sysHeaderContainer.createEl('h3', { text: `💻 ${sys}`, attr: { style: 'color: var(--text-muted); font-size: 1.1em; margin: 0;' } });
 
-                const sysSettingsBtn = sysHeaderContainer.createEl('button', { text: '⚙️', attr: { title: 'システム設定 (_system.md)', style: 'background: transparent; border: none; box-shadow: none; cursor: pointer; padding: 2px 5px; font-size: 1.1em; opacity: 0.7;' } });
+                const sysButtonGroup = sysHeaderContainer.createDiv({ attr: { style: 'display: flex; gap: 4px; align-items: center;' } });
+
+                const epicOrderBtn = sysButtonGroup.createEl('button', { text: '↕️', attr: { title: `「${sys}」のエピック順を管理`, style: 'background: transparent; border: none; box-shadow: none; cursor: pointer; padding: 2px 5px; font-size: 1.1em; opacity: 0.7;' } });
+                epicOrderBtn.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    new EpicOrderModal(this.app, this, filterCategory, sys, epicsMap).open();
+                };
+
+                const sysSettingsBtn = sysButtonGroup.createEl('button', { text: '⚙️', attr: { title: 'システム設定 (_system.md)', style: 'background: transparent; border: none; box-shadow: none; cursor: pointer; padding: 2px 5px; font-size: 1.1em; opacity: 0.7;' } });
                 sysSettingsBtn.onclick = async (e) => {
                     e.preventDefault();
                     e.stopPropagation();
