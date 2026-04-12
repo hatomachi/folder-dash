@@ -1175,11 +1175,23 @@ latest_update: ""
 
         const summaryPaths = (this.app.metadataCache as any).getCachedFiles().filter((path: string) => path.endsWith(TASK_MARKER_FILE));
 
-        type EpicData = { name: string, path: string, overview: string, schedule: string, file: TFile, visibility: string, category: string, system: string };
+        type EpicData = { name: string, path: string, overview: string, schedule: string, file: TFile, visibility: string, category: string, system: string, rank: number };
         const epicsMap: Record<string, EpicData> = {};
         const epicFilePaths = (this.app.metadataCache as any).getCachedFiles().filter((p: string) => p.endsWith(EPIC_MARKER_FILE));
         const uniqueSystems = new Set<string>();
         const uniqueVisibilities = new Set<string>();
+
+        const systemRanksMap: Record<string, number> = {};
+        const systemFilePaths = (this.app.metadataCache as any).getCachedFiles().filter((p: string) => p.endsWith('_system.md'));
+        for (const sysFilePath of systemFilePaths) {
+            const sysFile = this.app.vault.getAbstractFileByPath(sysFilePath);
+            if (sysFile instanceof TFile && sysFile.parent) {
+                const systemName = sysFile.parent.name;
+                const cache = this.app.metadataCache.getFileCache(sysFile);
+                const r = cache?.frontmatter?.rank;
+                systemRanksMap[systemName] = typeof r === 'number' ? r : 999;
+            }
+        }
 
         for (const epicFilePath of epicFilePaths) {
             const epicFile = this.app.vault.getAbstractFileByPath(epicFilePath);
@@ -1192,13 +1204,16 @@ latest_update: ""
                 const category = fm['category'] || '維持管理';
                 const system = fm['system'] || '未分類';
 
+                const rankRaw = fm['rank'];
+                const rank = typeof rankRaw === 'number' ? rankRaw : 999;
+
                 epicsMap[epicFile.parent.path] = {
                     name: epicFile.parent.name,
                     path: epicFile.parent.path,
                     overview: fm['overview'] || '',
                     schedule: fm['schedule'] || '',
                     file: epicFile,
-                    visibility, category, system
+                    visibility, category, system, rank
                 };
                 if (system && system !== '未分類') uniqueSystems.add(system);
                 if (visibility) uniqueVisibilities.add(visibility);
@@ -1482,7 +1497,7 @@ latest_update: ""
         if (this.currentMode === 'kanban') {
             this.renderKanban(container, tasks);
         } else {
-            this.renderAgenda(container, tasks, epicsMap);
+            this.renderAgenda(container, tasks, epicsMap, systemRanksMap);
         }
     }
 
@@ -1512,11 +1527,16 @@ latest_update: ""
         }
     }
 
-    renderAgenda(container: HTMLElement, tasks: any[], epicsMap: Record<string, any>) {
+    renderAgenda(container: HTMLElement, tasks: any[], epicsMap: Record<string, any>, systemRanksMap: Record<string, number>) {
         const systemsArray = Array.from(new Set(Object.values(epicsMap)
             .map((e: any) => e.system)
             .filter(s => s && s !== '未分類')
-        )).sort() as string[];
+        )).sort((a, b) => {
+            const rankA = systemRanksMap[a] ?? 999;
+            const rankB = systemRanksMap[b] ?? 999;
+            if (rankA !== rankB) return rankA - rankB;
+            return a.localeCompare(b);
+        }) as string[];
         
         const agendaDiv = container.createDiv({ attr: { style: 'display: flex; flex-direction: column; gap: 20px; padding-bottom: 20px;' } });
 
@@ -1543,7 +1563,12 @@ latest_update: ""
         const allThemes = Object.keys(grouped).sort((a, b) => {
             const epicA = epicsMap[a];
             const epicB = epicsMap[b];
-            if (epicA && epicB) return epicA.name.localeCompare(epicB.name);
+            if (epicA && epicB) {
+                const rankA = epicA.rank ?? 999;
+                const rankB = epicB.rank ?? 999;
+                if (rankA !== rankB) return rankA - rankB;
+                return epicA.name.localeCompare(epicB.name);
+            }
             return a.localeCompare(b);
         });
 
@@ -1567,13 +1592,55 @@ latest_update: ""
                 systemGroups[sys].push(theme);
             }
 
-            const sortedSystems = Object.keys(systemGroups).sort();
+            const sortedSystems = Object.keys(systemGroups).sort((a, b) => {
+                const rankA = systemRanksMap[a] ?? 999;
+                const rankB = systemRanksMap[b] ?? 999;
+                if (rankA !== rankB) return rankA - rankB;
+                return a.localeCompare(b);
+            });
 
             for (const sys of sortedSystems) {
                 const themes = systemGroups[sys];
                 if (!themes || themes.length === 0) continue;
 
-                sectionDiv.createEl('h3', { text: `💻 ${sys}`, attr: { style: 'margin-top: 15px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px dashed var(--background-modifier-border); color: var(--text-muted); font-size: 1.1em;' } });
+                const sysHeaderContainer = sectionDiv.createDiv({ attr: { style: 'display: flex; justify-content: space-between; align-items: center; margin-top: 15px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px dashed var(--background-modifier-border);' } });
+                sysHeaderContainer.createEl('h3', { text: `💻 ${sys}`, attr: { style: 'color: var(--text-muted); font-size: 1.1em; margin: 0;' } });
+
+                const sysSettingsBtn = sysHeaderContainer.createEl('button', { text: '⚙️', attr: { title: 'システム設定 (_system.md)', style: 'background: transparent; border: none; box-shadow: none; cursor: pointer; padding: 2px 5px; font-size: 1.1em; opacity: 0.7;' } });
+                sysSettingsBtn.onclick = async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    let systemRootPath = '';
+                    for (const theme of themes) {
+                        const epic = epicsMap[theme];
+                        if (epic && epic.file && epic.file.parent && epic.file.parent.parent) {
+                            systemRootPath = epic.file.parent.parent.path;
+                            break;
+                        }
+                    }
+
+                    if (!systemRootPath) {
+                        new Notice('システムのルートフォルダが見つかりません');
+                        return;
+                    }
+
+                    const systemFilePath = normalizePath(`${systemRootPath}/_system.md`);
+                    let systemFile = this.app.vault.getAbstractFileByPath(systemFilePath);
+
+                    if (!(systemFile instanceof TFile)) {
+                        try {
+                            systemFile = await this.app.vault.create(systemFilePath, "---\nrank: 10\n---\n");
+                            new Notice('システム設定を作成しました');
+                        } catch (err) {
+                            console.error(err);
+                            new Notice('システム設定の作成に失敗しました');
+                            return;
+                        }
+                    }
+
+                    await this.app.workspace.getLeaf(false).openFile(systemFile as TFile);
+                };
 
                 for (const theme of themes) {
                     const themeDetails = sectionDiv.createEl('details', { attr: { style: 'background: var(--background-secondary); border-radius: 8px; padding: 15px; margin-bottom: 15px;', open: 'true' } });
