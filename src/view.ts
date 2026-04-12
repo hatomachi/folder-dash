@@ -873,7 +873,7 @@ export class FolderDashBacklogView extends ItemView {
     isSearchFocused: boolean = false;
     searchCursorStart: number = 0;
     isSearchComposing: boolean = false;
-    isReportMode: boolean = false;
+    displayMode: 'standup' | 'report' | 'compact' = 'standup';
 
     constructor(leaf: WorkspaceLeaf, plugin: FolderDashPlugin) {
         super(leaf);
@@ -1237,24 +1237,32 @@ latest_update: ""
                 });
             };
 
-            const reportModeBtn = controlsContainer.createEl('button', {
-                text: this.isReportMode ? '☀️ 朝会モード' : '👔 報告モード',
-                attr: { style: this.isReportMode
-                    ? 'background-color: var(--interactive-accent); color: var(--text-on-accent); border: none;'
-                    : 'background-color: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted);' }
+            const modeLabels: Record<string, string> = {
+                'standup': '☀️ 朝会モード',
+                'report': '👔 報告モード',
+                'compact': '📋 一覧モード'
+            };
+            const modeActiveStyle = 'background-color: var(--interactive-accent); color: var(--text-on-accent); border: none;';
+            const modeInactiveStyle = 'background-color: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted);';
+
+            const displayModeBtn = controlsContainer.createEl('button', {
+                text: modeLabels[this.displayMode],
+                attr: { style: this.displayMode !== 'standup' ? modeActiveStyle : modeInactiveStyle }
             });
-            reportModeBtn.onclick = () => {
-                this.isReportMode = !this.isReportMode;
-                // CSSクラスでスタンドアップ項目の表示/非表示を制御
-                if (this.isReportMode) {
+            displayModeBtn.onclick = () => {
+                // サイクル: standup → report → compact → standup
+                const cycle: Array<'standup' | 'report' | 'compact'> = ['standup', 'report', 'compact'];
+                const idx = cycle.indexOf(this.displayMode);
+                this.displayMode = cycle[(idx + 1) % cycle.length] ?? 'standup';
+
+                container.classList.remove('report-mode-active', 'compact-mode-active');
+                if (this.displayMode === 'report') {
                     container.classList.add('report-mode-active');
-                } else {
-                    container.classList.remove('report-mode-active');
+                } else if (this.displayMode === 'compact') {
+                    container.classList.add('compact-mode-active');
                 }
-                reportModeBtn.textContent = this.isReportMode ? '☀️ 朝会モード' : '👔 報告モード';
-                reportModeBtn.setAttribute('style', this.isReportMode
-                    ? 'background-color: var(--interactive-accent); color: var(--text-on-accent); border: none;'
-                    : 'background-color: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted);');
+                displayModeBtn.textContent = modeLabels[this.displayMode] ?? '';
+                displayModeBtn.setAttribute('style', this.displayMode !== 'standup' ? modeActiveStyle : modeInactiveStyle);
             };
 
             const systemOrderBtn = controlsContainer.createEl('button', { text: '🔄 システム順を管理', attr: { style: 'background-color: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted);' } });
@@ -1263,9 +1271,11 @@ latest_update: ""
             };
         }
 
-        // 初期状態でreportModeがONなら report-mode-active クラスを付与
-        if (this.isReportMode) {
+        // 初期状態のモードに応じたCSSクラスを付与
+        if (this.displayMode === 'report') {
             container.classList.add('report-mode-active');
+        } else if (this.displayMode === 'compact') {
+            container.classList.add('compact-mode-active');
         }
 
         const newEpicBtn = controlsContainer.createEl('button', { text: '＋ 新規エピック', cls: 'mod-cta', attr: { style: 'padding: 4px 12px; height: auto;' } });
@@ -1675,10 +1685,21 @@ latest_update: ""
                 const ta = block.createEl('textarea', {
                     attr: {
                         placeholder,
-                        style: 'width: 100%; min-height: 52px; resize: vertical; font-family: inherit; font-size: 0.9em; line-height: 1.6; padding: 5px 7px; border-radius: 4px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); color: var(--text-normal); box-sizing: border-box;'
+                        rows: '1',
+                        style: 'width: 100%; min-height: 28px; overflow: hidden; resize: none; font-family: inherit; font-size: 0.9em; line-height: 1.6; padding: 5px 7px; border-radius: 4px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); color: var(--text-normal); box-sizing: border-box;'
                     }
                 });
                 ta.value = currentValue;
+
+                // auto-resize: 内容に合わせて高さを伸縮
+                const autoResize = () => {
+                    ta.style.height = 'auto';
+                    ta.style.height = Math.max(28, ta.scrollHeight) + 'px';
+                };
+                // 初期レンダリング時にサイズ合わせ
+                setTimeout(autoResize, 0);
+                ta.addEventListener('input', autoResize);
+
                 ta.addEventListener('change', async () => {
                     await this.app.fileManager.processFrontMatter(task.file, (fm) => {
                         fm[fmKey] = ta.value;
