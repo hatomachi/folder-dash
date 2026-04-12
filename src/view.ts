@@ -548,9 +548,9 @@ theme: "${relPathToEpic}"
             textArea.addEventListener('change', saveValue);
         };
 
-        createTextareaSection('概況 (overview)', 'overview', '100px');
+        createTextareaSection('概況 (overview)', 'overview', '100px', true);
         createTextareaSection('スケジュール (schedule)', 'schedule', '100px');
-        createTextareaSection('最新状況 (latest_update)', 'latest_update', '150px', true);
+        createTextareaSection('課題 (issues)', 'issues', '100px', true);
 
         // FILE LISTS
         await this.renderNoteList(container, parentFolder);
