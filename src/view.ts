@@ -446,7 +446,13 @@ export class FolderDashView extends ItemView {
             placeholder: string
         ) => {
             const block = editSection.createDiv({ attr: { style: `border-left: 4px solid ${borderColor}; background: ${bgColor}; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px;` } });
-            block.createDiv({ attr: { style: `font-weight: bold; font-size: 0.9em; color: ${borderColor}; margin-bottom: 6px;` }, text: `${icon} ${label}` });
+
+            // 見出しとツールバーを横並びに
+            const headerRow = block.createDiv({ attr: { style: 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;' } });
+            headerRow.createDiv({ attr: { style: `font-weight: bold; font-size: 0.9em; color: ${borderColor};` }, text: `${icon} ${label}` });
+
+            const toolbar = headerRow.createDiv({ attr: { style: 'display: flex; gap: 4px;' } });
+
             const ta = block.createEl('textarea', {
                 attr: {
                     placeholder,
@@ -455,6 +461,32 @@ export class FolderDashView extends ItemView {
                 }
             });
             ta.value = sfm[fmKey] || '';
+
+            // 選択テキストを色付き span でラップ
+            const wrapText = async (color: string) => {
+                const start = ta.selectionStart;
+                const end = ta.selectionEnd;
+                const text = ta.value;
+                const selectedText = text.substring(start, end);
+                if (!selectedText) {
+                    new Notice('テキストを選択してください');
+                    return;
+                }
+                const before = text.substring(0, start);
+                const after = text.substring(end);
+                ta.value = `${before}<span style="color: ${color};">${selectedText}</span>${after}`;
+                await this.app.fileManager.processFrontMatter(summaryFile, (fm) => {
+                    fm[fmKey] = ta.value;
+                });
+                autoResize();
+                ta.focus();
+                ta.setSelectionRange(start, start + selectedText.length + 23 + color.length + 9);
+            };
+
+            const redBtn = toolbar.createEl('button', { text: '🔴 赤字', attr: { style: 'font-size: 0.75em; padding: 2px 6px; height: auto;' } });
+            redBtn.onclick = () => wrapText('red');
+            const blueBtn = toolbar.createEl('button', { text: '🔵 青字', attr: { style: 'font-size: 0.75em; padding: 2px 6px; height: auto;' } });
+            blueBtn.onclick = () => wrapText('blue');
 
             const autoResize = () => {
                 ta.style.height = 'auto';
@@ -1735,7 +1767,7 @@ latest_update: ""
                 const block = parent.createDiv({ cls: `fd-task-callout${extraCls ? ' ' + extraCls : ''}`, attr: { style: `border-left: 4px solid ${borderColor}; background: ${bgColor}; border-radius: 6px; padding: 8px 12px;` } });
                 block.createDiv({ cls: 'fd-task-callout-title', attr: { style: `font-weight: bold; font-size: 0.9em; color: ${borderColor}; margin-bottom: 4px;` }, text: `${icon} ${label}` });
                 const body = block.createDiv({ cls: 'fd-task-callout-body', attr: { style: 'font-size: 0.9em; line-height: 1.6; color: var(--text-normal); white-space: pre-wrap; word-break: break-word;' } });
-                body.textContent = currentValue;
+                body.innerHTML = currentValue;
             };
 
             createTaskCalloutReadonly(
