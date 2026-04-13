@@ -433,6 +433,59 @@ export class FolderDashView extends ItemView {
             }).open();
         };
 
+        // ── タスク詳細編集セクション ──
+        const editSection = container.createDiv({ attr: { style: 'margin-bottom: 20px;' } });
+        editSection.createEl('h3', { text: '📝 詳細メモ', attr: { style: 'font-size: 1em; margin-bottom: 12px; color: var(--text-muted);' } });
+
+        const createTaskEditCallout = (
+            icon: string,
+            label: string,
+            fmKey: string,
+            borderColor: string,
+            bgColor: string,
+            placeholder: string
+        ) => {
+            const block = editSection.createDiv({ attr: { style: `border-left: 4px solid ${borderColor}; background: ${bgColor}; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px;` } });
+            block.createDiv({ attr: { style: `font-weight: bold; font-size: 0.9em; color: ${borderColor}; margin-bottom: 6px;` }, text: `${icon} ${label}` });
+            const ta = block.createEl('textarea', {
+                attr: {
+                    placeholder,
+                    rows: '2',
+                    style: 'width: 100%; min-height: 36px; overflow: hidden; resize: none; font-family: inherit; font-size: 0.9em; line-height: 1.6; padding: 5px 7px; border-radius: 4px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); color: var(--text-normal); box-sizing: border-box;'
+                }
+            });
+            ta.value = sfm[fmKey] || '';
+
+            const autoResize = () => {
+                ta.style.height = 'auto';
+                ta.style.height = Math.max(36, ta.scrollHeight) + 'px';
+            };
+            setTimeout(autoResize, 0);
+            ta.addEventListener('input', autoResize);
+
+            ta.addEventListener('change', async () => {
+                await this.app.fileManager.processFrontMatter(summaryFile, (fm) => {
+                    fm[fmKey] = ta.value;
+                });
+            });
+        };
+
+        createTaskEditCallout(
+            '💬', '状況説明', 'latest_update',
+            '#2d7ad6', 'rgba(45,122,214,0.06)',
+            '【上長向け】進捗の全体感、完了見込み、ブロッカーの有無\n(例) 実装完了しテスト中。他への影響はなく明日リリース予定。'
+        );
+        createTaskEditCallout(
+            '🔄', '昨日の振り返り', 'yesterday',
+            '#6f42c1', 'rgba(111,66,193,0.06)',
+            '【自省用】昨日の計画に対する結果、気づき・反省\n(例) 〇〇の実装で想定より1時間超過。事前の仕様確認が甘かった。'
+        );
+        createTaskEditCallout(
+            '🎯', '本日やること', 'today',
+            '#e36209', 'rgba(227,98,9,0.06)',
+            '【朝会用】今日終わらせる具体的なアクション\n(例) 残りのテストを消化し、15時までにPRを作成してレビュー依頼する。'
+        );
+
         // FILE LISTS
         await this.renderNoteList(container, parentFolder);
 
@@ -1668,63 +1721,38 @@ latest_update: ""
         if (viewMode === 'agenda') {
             const taskCallouts = mainContent.createDiv({ cls: 'fd-task-callouts', attr: { style: 'display: flex; flex-direction: column; gap: 8px; margin-top: 8px;' } });
 
-            // ── ヘルパー: 編集可能コールアウトブロックの生成 ──
-            const createTaskCallout = (
+            // ── ヘルパー: 閲覧専用コールアウトブロック（値がある場合のみ表示）──
+            const createTaskCalloutReadonly = (
                 parent: HTMLElement,
                 icon: string,
                 label: string,
-                fmKey: string,
                 currentValue: string,
                 borderColor: string,
                 bgColor: string,
-                placeholder: string,
                 extraCls?: string
             ) => {
+                if (!currentValue) return; // 値がなければ非表示
                 const block = parent.createDiv({ cls: `fd-task-callout${extraCls ? ' ' + extraCls : ''}`, attr: { style: `border-left: 4px solid ${borderColor}; background: ${bgColor}; border-radius: 6px; padding: 8px 12px;` } });
                 block.createDiv({ cls: 'fd-task-callout-title', attr: { style: `font-weight: bold; font-size: 0.9em; color: ${borderColor}; margin-bottom: 4px;` }, text: `${icon} ${label}` });
-                const ta = block.createEl('textarea', {
-                    attr: {
-                        placeholder,
-                        rows: '1',
-                        style: 'width: 100%; min-height: 28px; overflow: hidden; resize: none; font-family: inherit; font-size: 0.9em; line-height: 1.6; padding: 5px 7px; border-radius: 4px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); color: var(--text-normal); box-sizing: border-box;'
-                    }
-                });
-                ta.value = currentValue;
-
-                // auto-resize: 内容に合わせて高さを伸縮
-                const autoResize = () => {
-                    ta.style.height = 'auto';
-                    ta.style.height = Math.max(28, ta.scrollHeight) + 'px';
-                };
-                // 初期レンダリング時にサイズ合わせ
-                setTimeout(autoResize, 0);
-                ta.addEventListener('input', autoResize);
-
-                ta.addEventListener('change', async () => {
-                    await this.app.fileManager.processFrontMatter(task.file, (fm) => {
-                        fm[fmKey] = ta.value;
-                    });
-                });
+                const body = block.createDiv({ cls: 'fd-task-callout-body', attr: { style: 'font-size: 0.9em; line-height: 1.6; color: var(--text-normal); white-space: pre-wrap; word-break: break-word;' } });
+                body.textContent = currentValue;
             };
 
-            createTaskCallout(
+            createTaskCalloutReadonly(
                 taskCallouts,
-                '💬', '状況説明', 'latest_update', task.latestUpdate,
-                '#2d7ad6', 'rgba(45,122,214,0.06)',
-                '【上長向け】進捗の全体感、完了見込み、ブロッカーの有無\n(例) 実装完了しテスト中。他への影響はなく明日リリース予定。'
+                '💬', '状況説明', task.latestUpdate,
+                '#2d7ad6', 'rgba(45,122,214,0.06)'
             );
-            createTaskCallout(
+            createTaskCalloutReadonly(
                 taskCallouts,
-                '🔄', '昨日の振り返り', 'yesterday', task.yesterday,
+                '🔄', '昨日の振り返り', task.yesterday,
                 '#6f42c1', 'rgba(111,66,193,0.06)',
-                '【自省用】昨日の計画に対する結果、気づき・反省\n(例) 〇〇の実装で想定より1時間超過。事前の仕様確認が甘かった。',
                 'standup-item'
             );
-            createTaskCallout(
+            createTaskCalloutReadonly(
                 taskCallouts,
-                '🎯', '本日やること', 'today', task.today,
+                '🎯', '本日やること', task.today,
                 '#e36209', 'rgba(227,98,9,0.06)',
-                '【朝会用】今日終わらせる具体的なアクション\n(例) 残りのテストを消化し、15時までにPRを作成してレビュー依頼する。',
                 'standup-item'
             );
         }
